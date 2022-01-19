@@ -1,0 +1,18 @@
+# SPDX-License-Identifier: Apache-2.0
+# West yml manifest for Zephyr dom0 demo
+
+manifest:
+  self:
+    path: .
+
+  remotes:
+    - name: firscity_zephyr_dom0
+      url-base: https://github.com/firscity/
+
+  projects:
+    - name: zephyr_dom0
+      remote: firscity_zephyr_dom0
+      repo-path: zephyr.git
+      revision: dom0_demo_devel
+      west-commands: scripts/west-commands.yml
+
