@@ -1,0 +1,7 @@
+# Build file
+build/*
+
+# Eclipse Project files
+.cproject
+.project
+.settings/*
