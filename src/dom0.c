@@ -17,6 +17,8 @@
 
 #include <xen/public/io/console.h>
 
+#include "domain.h"
+
 #include <init.h>
 #include <kernel.h>
 #include <string.h>
@@ -31,6 +33,8 @@
 #define ARCH_DOMU_NR_SPIS	0
 
 #define DOMU_MAXMEM_KB		65536
+
+static sys_dlist_t domain_list = SYS_DLIST_STATIC_INIT(&domain_list);
 
 static void arch_prepare_domain_cfg(struct xen_arch_domainconfig *arch_cfg)
 {
@@ -49,12 +53,6 @@ static void prepare_domain_cfg(struct xen_domctl_createdomain *cfg)
 
 	arch_prepare_domain_cfg(&cfg->arch);
 }
-
-#define NR_MAGIC_PAGES		4
-#define CONSOLE_PFN_OFFSET 0
-#define XENSTORE_PFN_OFFSET 1
-#define MEMACCESS_PFN_OFFSET 2
-#define VUART_PFN_OFFSET 3
 
 static int allocate_magic_pages(int domid, uint64_t base_pfn)
 {
@@ -186,79 +184,34 @@ uint64_t load_domu_image(int domid, uint64_t base_addr)
 	return base_addr + zhdr->text_offset;
 }
 
-static struct xencons_interface *intf;
-K_KERNEL_STACK_DEFINE(read_thrd_stack, 8192);
-struct k_thread read_thrd;
-k_tid_t read_tid;
-bool console_thrd_stop = false;
-
-/* Need to read from OUT ring in dom0, domU writes logs there */
-static int read_from_ring(char *str, int len)
-{
-	int recv = 0;
-	XENCONS_RING_IDX cons = intf->out_cons;
-	XENCONS_RING_IDX prod = intf->out_prod;
-	XENCONS_RING_IDX out_idx = 0;
-
-	compiler_barrier();
-	__ASSERT((prod - cons) <= sizeof(intf->out),
-			"Invalid input ring buffer");
-
-	while (cons != prod && recv < len) {
-		out_idx = MASK_XENCONS_IDX(cons, intf->out);
-		str[recv] = intf->out[out_idx];
-		recv++;
-		cons++;
-	}
-
-	compiler_barrier();
-	intf->out_cons = cons;
-
-	return recv;
-}
-
-static void console_read_thrd(void *p1, void *p2, void *p3)
-{
-	ARG_UNUSED(p1);
-	ARG_UNUSED(p2);
-	ARG_UNUSED(p3);
-	char buffer[128];
-	int recv;
-	printk("Starting read thread!\n");
-
-	while (!console_thrd_stop) {
-		memset(buffer, 0, sizeof(buffer));
-		recv = read_from_ring(buffer, sizeof(buffer));
-		if (recv) {
-			printk("[domain hvc] %s", buffer);
-		}
-		k_sleep(K_MSEC(1000));
-	}
-
-	/* TODO: add memory freeing */
-	printk("Exiting read thread!!!\n");
-}
-
-void start_domain_console(int domid)
+int map_domain_console_ring(struct xen_domain *domain)
 {
 	void *mapped_ring;
 	xen_pfn_t ring_pfn, idx;
 	int err, rc;
 
 	mapped_ring = k_aligned_alloc(XEN_PAGE_SIZE, XEN_PAGE_SIZE);
+	if (!mapped_ring) {
+		printk("Failed to alloc memory for domain #%d console ring buffer\n",
+			domain->domid);
+		return -ENOMEM;
+	}
+
 	ring_pfn = virt_to_pfn(mapped_ring);
 	idx = PHYS_PFN(GUEST_MAGIC_BASE) + CONSOLE_PFN_OFFSET;
 
 	/* adding single page, but only xatpb can map with foreign domid */
-	rc = xendom_add_to_physmap_batch(DOMID_SELF, domid, XENMAPSPACE_gmfn_foreign,
+	rc = xendom_add_to_physmap_batch(DOMID_SELF, domain->domid, XENMAPSPACE_gmfn_foreign,
 				1, &idx, &ring_pfn, &err);
-	printk("Return code for XENMEM_add_to_physmap_batch = %d, (console ring)\n", rc);
+	if (rc) {
+		printk("Failed to map console ring buffer of domain #%d - rc = %d\n",
+			domain->domid, rc);
+		return rc;
+	}
 
-	intf = mapped_ring;
+	domain->intf = mapped_ring;
 
-	read_tid = k_thread_create(&read_thrd, read_thrd_stack,
-				K_KERNEL_STACK_SIZEOF(read_thrd_stack),
-				console_read_thrd, NULL, NULL, NULL, 7, 0, K_NO_WAIT);
+	return 0;
 }
 
 int domu_create(void)
@@ -272,19 +225,31 @@ int domu_create(void)
 	uint64_t base_addr = GUEST_RAM0_BASE;
 	uint64_t base_pfn = PHYS_PFN(base_addr);
 	uint64_t ventry;
+	struct xen_domain *domain;
 
 	memset(&config, 0, sizeof(config));
 	prepare_domain_cfg(&config);
 	rc = xen_domctl_createdomain(domid, &config);
 	printk("Return code = %d creation\n", rc);
+	if (rc)
+		return rc;
 
-	rc = xen_domctl_max_vcpus(domid, 1);
+	domain = k_malloc(sizeof(*domain));
+	__ASSERT(domain, "Can not allocate memory for domain struct");
+	memset(domain, 0, sizeof(*domain));
+	domain->domid = domid;
+	sys_dnode_init(&domain->node);
+
+	rc = xen_domctl_max_vcpus(domid, DOMU_MAX_VCPUS);
 	printk("Return code = %d max_vcpus\n", rc);
+	domain->num_vcpus = DOMU_MAX_VCPUS;
 
 	rc = xen_domctl_set_address_size(domid, 64);
 	printk("Return code = %d set_address_size\n", rc);
+	domain->address_size = 64;
 
 	rc = xen_domctl_max_mem(domid, DOMU_MAXMEM_KB);
+	domain->max_mem_kb = DOMU_MAXMEM_KB;
 
 	/* TODO: fix mem amount here, some memory should left for populating magic pages */
 	rc = prepare_domu_physmap(domid, base_pfn, DOMU_MAXMEM_KB/2);
@@ -321,10 +286,18 @@ int domu_create(void)
 	rc = xen_domctl_scheduler_op(domid, &sched_op);
 	printk("Return code = %d SCHEDOP_putinfo\n", rc);
 
+	/* TODO: lock here? */
+	sys_dlist_append(&domain_list, &domain->node);
 	rc = xen_domctl_unpausedomain(domid);
 	printk("Return code = %d XEN_DOMCTL_unpausedomain\n", rc);
 
-	start_domain_console(domid);
+	rc = map_domain_console_ring(domain);
+	printk("map domain ring OK\n");
+	if (rc) {
+		return rc;
+	}
+
+	start_domain_console(domain);
 
 	return rc;
 }
@@ -334,10 +307,36 @@ int domu_destroy()
 	/* TODO: pass domid as parameter */
 	int rc;
 	uint32_t domid = 1;
+	xen_pfn_t ring_pfn;
+	struct xen_domain *iter, *domain = NULL;
 
-	console_thrd_stop = true;
+	SYS_DLIST_FOR_EACH_CONTAINER(&domain_list, iter, node) {
+		if (iter->domid == domid) {
+			domain = iter;
+		}
+	}
+
+	if (!domain) {
+		/* Domain with requested domid is not present in list */
+		return -EINVAL;
+	}
+
+	stop_domain_console(domain);
+
+	ring_pfn = virt_to_pfn(domain->intf);
+	rc = xendom_remove_from_physmap(DOMID_SELF, ring_pfn);
+	printk("Return code for xendom_remove_from_physmap = %d, (console ring)\n", rc);
+
+	rc = xendom_populate_physmap(DOMID_SELF, 0, 1, 0, &ring_pfn);
+	printk("Return code for xendom_populate_physmap = %d, (console ring)\n", rc);
+
+	k_free(domain->intf);
+
 	rc = xen_domctl_destroydomain(domid);
 	printk("Return code = %d XEN_DOMCTL_destroydomain\n", rc);
+
+	sys_dlist_remove(&domain->node);
+	k_free(domain);
 
 	return rc;
 }
