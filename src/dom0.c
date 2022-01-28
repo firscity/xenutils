@@ -21,6 +21,8 @@
 
 #include <init.h>
 #include <kernel.h>
+#include <shell/shell.h>
+#include <stdlib.h>
 #include <string.h>
 
 /* TODO: this should be read from some "config" */
@@ -214,11 +216,90 @@ int map_domain_console_ring(struct xen_domain *domain)
 	return 0;
 }
 
-int domu_create(void)
+struct xen_domain * domid_to_domain(uint32_t domid)
+{
+	struct xen_domain *iter;
+
+	SYS_DLIST_FOR_EACH_CONTAINER(&domain_list, iter, node) {
+		if (iter->domid == domid) {
+			return iter;
+		}
+	}
+
+	return NULL;
+}
+
+uint32_t parse_domid(size_t argc, char **argv)
+{
+	/* first would be the cmd name, start from second */
+	int pos = 1;
+
+	if (argv[pos][0] == '-' && argv[pos][1] == 'd') {
+		/* Take next value after "-d" option */
+		pos++;
+		return atoi(argv[pos]);
+	}
+
+	/* Use zero as invalid value */
+	return 0;
+}
+
+extern int start_domain_console(struct xen_domain *domain);
+extern int stop_domain_console(struct xen_domain *domain);
+
+int domu_console_start(const struct shell *shell, size_t argc, char **argv)
+{
+	uint32_t domid = 0;
+	struct xen_domain *domain;
+
+	if (argc < 3 || argc > 4) {
+		return -EINVAL;
+	}
+
+	domid = parse_domid(argc, argv);
+	if (!domid) {
+		printk("Invalid domid passed to create cmd\n");
+		return -EINVAL;
+	}
+
+	domain = domid_to_domain(domid);
+	if (!domain) {
+		printk("No domain with domid = %u is present\n", domid);
+		/* Domain with requested domid is not present in list */
+		return -EINVAL;
+	}
+
+	return start_domain_console(domain);
+}
+int domu_console_stop(const struct shell *shell, size_t argc, char **argv)
+{
+	uint32_t domid = 0;
+	struct xen_domain *domain;
+
+	if (argc < 3 || argc > 4) {
+		return -EINVAL;
+	}
+
+	domid = parse_domid(argc, argv);
+	if (!domid) {
+		printk("Invalid domid passed to create cmd\n");
+		return -EINVAL;
+	}
+
+	domain = domid_to_domain(domid);
+	if (!domain) {
+		printk("No domain with domid = %u is present\n", domid);
+		/* Domain with requested domid is not present in list */
+		return -EINVAL;
+	}
+
+	return stop_domain_console(domain);
+}
+int domu_create(const struct shell *shell, size_t argc, char **argv)
 {
 	/* TODO: pass mem, domid etc. as parameters */
 	int rc = 0;
-	uint32_t domid = 1;
+	uint32_t domid = 0;
 	struct xen_domctl_createdomain config;
 	struct vcpu_guest_context vcpu_ctx;
 	struct xen_domctl_scheduler_op sched_op;
@@ -227,12 +308,23 @@ int domu_create(void)
 	uint64_t ventry;
 	struct xen_domain *domain;
 
+	if (argc < 3 || argc > 4) {
+		return -EINVAL;
+	}
+
+	domid = parse_domid(argc, argv);
+	if (!domid) {
+		printk("Invalid domid passed to create cmd\n");
+		return -EINVAL;
+	}
+
 	memset(&config, 0, sizeof(config));
 	prepare_domain_cfg(&config);
 	rc = xen_domctl_createdomain(domid, &config);
 	printk("Return code = %d creation\n", rc);
-	if (rc)
+	if (rc) {
 		return rc;
+	}
 
 	domain = k_malloc(sizeof(*domain));
 	__ASSERT(domain, "Can not allocate memory for domain struct");
@@ -291,38 +383,41 @@ int domu_create(void)
 	rc = xen_domctl_unpausedomain(domid);
 	printk("Return code = %d XEN_DOMCTL_unpausedomain\n", rc);
 
+	/* TODO: do this on console creation */
 	rc = map_domain_console_ring(domain);
 	printk("map domain ring OK\n");
 	if (rc) {
 		return rc;
 	}
 
-	start_domain_console(domain);
-
 	return rc;
 }
 
-int domu_destroy()
+int domu_destroy(const struct shell *shell, size_t argc, char **argv)
 {
-	/* TODO: pass domid as parameter */
 	int rc;
-	uint32_t domid = 1;
+	uint32_t domid = 0;
 	xen_pfn_t ring_pfn;
-	struct xen_domain *iter, *domain = NULL;
+	struct xen_domain *domain = NULL;
 
-	SYS_DLIST_FOR_EACH_CONTAINER(&domain_list, iter, node) {
-		if (iter->domid == domid) {
-			domain = iter;
-		}
+	if (argc < 3 || argc > 4) {
+		return -EINVAL;
 	}
 
+	domid = parse_domid(argc, argv);
+	if (!domid) {
+		printk("Invalid domid passed to destroy cmd\n");
+		return -EINVAL;
+	}
+
+	domain = domid_to_domain(domid);
 	if (!domain) {
+		printk("No domain with domid = %u is present\n", domid);
 		/* Domain with requested domid is not present in list */
 		return -EINVAL;
 	}
 
-	stop_domain_console(domain);
-
+	/* TODO: do this on console destroying */
 	ring_pfn = virt_to_pfn(domain->intf);
 	rc = xendom_remove_from_physmap(DOMID_SELF, ring_pfn);
 	printk("Return code for xendom_remove_from_physmap = %d, (console ring)\n", rc);

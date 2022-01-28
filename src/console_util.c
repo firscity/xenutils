@@ -12,6 +12,9 @@
 #include <string.h>
 
 bool console_thrd_stop = false;
+K_KERNEL_STACK_DEFINE(read_thrd_stack, 8192);
+struct k_thread read_thrd;
+k_tid_t read_tid;
 
 /*
  * Need to read from OUT ring in dom0, domU writes logs there
@@ -56,20 +59,24 @@ void console_read_thrd(void *intf, void *p2, void *p3)
 		memset(buffer, 0, sizeof(buffer));
 		recv = read_from_ring((struct xencons_interface *) intf, buffer, sizeof(buffer));
 		if (recv) {
-			printk("[domain hvc] %s", buffer);
+			printk("%s", buffer);
 		}
-		k_sleep(K_MSEC(1000));
+		if (recv != sizeof(buffer)) {
+			/* No data left, wait for prints */
+			k_sleep(K_MSEC(500));
+		}
 	}
 
 	printk("Exiting read thread!\n");
 }
 
-K_KERNEL_STACK_DEFINE(read_thrd_stack, 8192);
-struct k_thread read_thrd;
-k_tid_t read_tid;
-
 int start_domain_console(struct xen_domain *domain)
 {
+	if (read_tid) {
+		printk("Console thread is already running for another domain!\n");
+		return -EBUSY;
+	}
+
 	printk("creating read thread\n");
 	console_thrd_stop = false;
 	read_tid = k_thread_create(&read_thrd, read_thrd_stack,
@@ -82,5 +89,6 @@ int start_domain_console(struct xen_domain *domain)
 int stop_domain_console(struct xen_domain *domain)
 {
 	console_thrd_stop = true;
+	read_tid = NULL;
 	return 0;
 }
