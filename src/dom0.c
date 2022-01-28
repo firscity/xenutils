@@ -4,7 +4,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include <arch/arm64/hypercall.h>
 #include <xen/dom0/domctl.h>
 #include <xen/dom0/zimage.h>
 #include <xen/generic.h>
@@ -15,9 +14,7 @@
 #include <xen/public/domctl.h>
 #include <xen/public/xen.h>
 
-#include <xen/public/io/console.h>
-
-#include "domain.h"
+#include <domain.h>
 
 #include <init.h>
 #include <kernel.h>
@@ -245,7 +242,7 @@ uint32_t parse_domid(size_t argc, char **argv)
 }
 
 extern int start_domain_console(struct xen_domain *domain);
-extern int stop_domain_console(struct xen_domain *domain);
+extern int stop_domain_console(void);
 
 int domu_console_start(const struct shell *shell, size_t argc, char **argv)
 {
@@ -273,27 +270,7 @@ int domu_console_start(const struct shell *shell, size_t argc, char **argv)
 }
 int domu_console_stop(const struct shell *shell, size_t argc, char **argv)
 {
-	uint32_t domid = 0;
-	struct xen_domain *domain;
-
-	if (argc < 3 || argc > 4) {
-		return -EINVAL;
-	}
-
-	domid = parse_domid(argc, argv);
-	if (!domid) {
-		printk("Invalid domid passed to create cmd\n");
-		return -EINVAL;
-	}
-
-	domain = domid_to_domain(domid);
-	if (!domain) {
-		printk("No domain with domid = %u is present\n", domid);
-		/* Domain with requested domid is not present in list */
-		return -EINVAL;
-	}
-
-	return stop_domain_console(domain);
+	return stop_domain_console();
 }
 int domu_create(const struct shell *shell, size_t argc, char **argv)
 {

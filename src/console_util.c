@@ -86,8 +86,13 @@ int start_domain_console(struct xen_domain *domain)
 	return 0;
 }
 
-int stop_domain_console(struct xen_domain *domain)
+int stop_domain_console(void)
 {
+	if (!read_tid) {
+		printk("No console thread is running!\n");
+		return -ESRCH;
+	}
+
 	console_thrd_stop = true;
 	read_tid = NULL;
 	return 0;

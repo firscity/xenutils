@@ -21,8 +21,8 @@ SHELL_STATIC_SUBCMD_SET_CREATE(subcmd_xu,
 			domu_console_start, 3, 1),
 		SHELL_CMD_ARG(console_stop, NULL,
 			" Stop console thread for Xen domain\n"
-			" Usage: console_stop -d domid\n",
-			domu_console_stop, 3, 1),
+			" Usage: console_stop\n",
+			domu_console_stop, 1, 1)
 );
 
 SHELL_CMD_ARG_REGISTER(xu, &subcmd_xu, "Xenutils commands", NULL, 2, 0);
