@@ -15,9 +15,10 @@ First of all you need to pass Zephyr RTOS [getting started guide](https://docs.z
 
 Then you need to fetch this repo to separate directory in you workdir (please note, that Zephyr metatool west will fetch all project dependencies to upper directory):
 ```
-$ cd ~/
-$: mkdir projectdir   # project dependencies will be located here
-$: git fetch https://github.com/firscity/xenutils.git
+$: cd ~/
+$: mkdir projectdir   # project dependencies will be located here, e.g. west will copy specific Zephyr snapshot in here
+$: cd projectdir/
+$: git clone https://github.com/firscity/xenutils.git
 $: cd xenutils/
 ```
 Now you need to initialize west metatool with project manifest:
@@ -53,7 +54,7 @@ After successful build Zephyr RTOS binary will be located in `~/projectdir/xenut
 
 ---
 
-# Available shell cmds
+## Available shell cmds
 To create unprivilaged domain please run following cmd in Zephyr shell (automatic domid selection is not currently supported, it is possible to create multiple domains, just use different domid's):
 ```
  $: xu create -d <domid>
