@@ -1,3 +1,4 @@
+#include <xen/events.h>
 #include <xen/generic.h>
 
 struct domain_console {
@@ -11,4 +12,5 @@ struct xen_domain {
 	int address_size;
 	uint64_t max_mem_kb;
 	sys_dnode_t node;
+	evtchn_port_t console_evtchn;
 };

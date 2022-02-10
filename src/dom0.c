@@ -53,6 +53,24 @@ static void prepare_domain_cfg(struct xen_domctl_createdomain *cfg)
 	arch_prepare_domain_cfg(&cfg->arch);
 }
 
+static int allocate_domain_evtchns(struct xen_domain *domain)
+{
+	int rc;
+
+	/* TODO: Alloc all required evtchns */
+	rc = evtchn_alloc_unbound(domain->domid, 0);
+	if (rc < 0) {
+		printk("failed to alloc evtchn for domain #%d console, rc = %d\n",
+			domain->domid, rc);
+		return rc;
+	}
+
+	domain->console_evtchn = rc;
+	rc = hvm_set_parameter(HVM_PARAM_CONSOLE_EVTCHN, domain->domid, domain->console_evtchn);
+
+	return 0;
+}
+
 static int allocate_magic_pages(int domid, uint64_t base_pfn)
 {
 	int rc, i;
@@ -103,7 +121,6 @@ static int allocate_magic_pages(int domid, uint64_t base_pfn)
 	/* TODO: Set HVM params for all allocated pages */
 	rc = hvm_set_parameter(HVM_PARAM_CONSOLE_PFN, domid, magic_base_pfn + CONSOLE_PFN_OFFSET);
 
-	/* TODO: fix event-channels for pages */
 	return rc;
 }
 
@@ -213,7 +230,7 @@ int map_domain_console_ring(struct xen_domain *domain)
 	return 0;
 }
 
-struct xen_domain * domid_to_domain(uint32_t domid)
+struct xen_domain *domid_to_domain(uint32_t domid)
 {
 	struct xen_domain *iter;
 
@@ -320,6 +337,8 @@ int domu_create(const struct shell *shell, size_t argc, char **argv)
 	rc = xen_domctl_max_mem(domid, DOMU_MAXMEM_KB);
 	domain->max_mem_kb = DOMU_MAXMEM_KB;
 
+	rc = allocate_domain_evtchns(domain);
+	printk("Return code = %d allocate_domain_evtchns\n", rc);
 	/* TODO: fix mem amount here, some memory should left for populating magic pages */
 	rc = prepare_domu_physmap(domid, base_pfn, DOMU_MAXMEM_KB/2);
 
