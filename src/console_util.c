@@ -73,6 +73,11 @@ void evtchn_callback(void *priv)
 
 int start_domain_console(struct xen_domain *domain)
 {
+	if (read_tid) {
+		printk("Console thread is already running for another domain!\n");
+		return -EBUSY;
+	}
+
 	local_console_chn = evtchn_bind_interdomain(domain->domid, domain->console_evtchn);
 
 	k_sem_init(&sem, 0, 1);
