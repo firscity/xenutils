@@ -44,13 +44,46 @@ $: ls ~/projectdir/
 xenutils  zephyr_dom0
 ```
 
-Now it is possible to start project build:
+Now it is possible to configure environment and start project build:
 ```
 $: cd ~/projectdir/xenutils/
+$: source ~/projectdir/zephyr_dom0/zephyr-env.sh
 $: west build -b xenvm
 ```
 
 After successful build Zephyr RTOS binary will be located in `~/projectdir/xenutils/build/zephyr` directory (`zephyr.bin`). You need to pass it to Xen as Domain 0.
+
+To always rebuild Zephyr sources (useful for debugging build issues), you can set build pristine to `always`:
+```
+$: west build -b xenvm -p always
+```
+
+Also it is possible to build XenUtils via Zephyr Project Dockerimage. You need to perform all commands, except the last three,
+they will be made inside Docker.
+Steps:
+
+Clone Dockerfiles from repo:
+```
+$: git clone https://github.com/zephyrproject-rtos/docker-image.git
+```
+
+Build Dockerimage:
+```
+$: cd docker-image
+$: docker build -f Dockerfile.user --build-arg UID=$(id -u) --build-arg GID=$(id -g) -t zephyr-build:xenutils-image
+```
+
+Start Dockerimage and pass `projectdir` with already fetched sources (via `west update`) to Docker as volume:
+```
+$: docker run -ti -v ~/projectdir/:/workdir zephyr-build:xenutils-image
+```
+
+After this you will come to Docker shell and can run build cmds:
+```
+$: cd /workdir/xenutils/
+$: source /workdir/zephyr_dom0/zephyr-env.sh
+$: west build -b xenvm
+```
 
 ---
 
