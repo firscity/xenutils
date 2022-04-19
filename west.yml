@@ -13,6 +13,6 @@ manifest:
     - name: zephyr_dom0
       remote: firscity_zephyr_dom0
       repo-path: zephyr.git
-      revision: dom0_demo_devel
+      revision: uboot-devel
       west-commands: scripts/west-commands.yml
 
