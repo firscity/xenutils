@@ -29,7 +29,7 @@
 #define DOMU_MAX_GNT_FRAMES	1
 #define DOMU_MAX_MAPTRCK_FR	1
 
-#define ARCH_DOMU_NR_SPIS	0
+#define ARCH_DOMU_NR_SPIS	190
 
 #define DOMU_MAXMEM_KB		65536
 
@@ -120,6 +120,7 @@ static int allocate_magic_pages(int domid, uint64_t base_pfn)
 
 	/* TODO: Set HVM params for all allocated pages */
 	rc = hvm_set_parameter(HVM_PARAM_CONSOLE_PFN, domid, magic_base_pfn + CONSOLE_PFN_OFFSET);
+	rc = hvm_set_parameter(HVM_PARAM_STORE_PFN, domid, magic_base_pfn + XENSTORE_PFN_OFFSET);
 
 	return rc;
 }
@@ -142,21 +143,21 @@ static int prepare_domu_physmap(int domid, uint64_t base_pfn,
 	return allocate_magic_pages(domid, base_pfn);
 }
 
-extern char __zephyr_domu_start[];
-extern char __zephyr_domu_end[];
+extern char __uboot_domu_start[];
+extern char __uboot_domu_end[];
 uint64_t load_domu_image(int domid, uint64_t base_addr)
 {
 	int i, rc;
 	void *mapped_domu;
 	uint64_t mapped_base_pfn;
-	uint64_t domu_size = __zephyr_domu_end - __zephyr_domu_start;
+	uint64_t domu_size = __uboot_domu_end - __uboot_domu_start;
 	uint64_t nr_pages = ceiling_fraction(domu_size, XEN_PAGE_SIZE);
 	xen_pfn_t mapped_pfns[nr_pages];
 	xen_pfn_t indexes[nr_pages];
 	int err_codes[nr_pages];
 	struct xen_domctl_cacheflush cacheflush;
 
-	struct zimage64_hdr *zhdr = (struct zimage64_hdr *) __zephyr_domu_start;
+	struct zimage64_hdr *zhdr = (struct zimage64_hdr *) __uboot_domu_start;
 	uint64_t base_pfn = PHYS_PFN(base_addr);
 
 	mapped_domu = k_aligned_alloc(XEN_PAGE_SIZE, XEN_PAGE_SIZE * nr_pages);
@@ -172,10 +173,10 @@ uint64_t load_domu_image(int domid, uint64_t base_addr)
 	printk("Return code for XENMEM_add_to_physmap_batch = %d\n", rc);
 	printk("mapped_domu = %p\n", mapped_domu);
 	printk("Zephyr DomU start addr = %p, end addr = %p, binary size = 0x%llx\n",
-		__zephyr_domu_start, __zephyr_domu_end, domu_size);
+		__uboot_domu_start, __uboot_domu_end, domu_size);
 
 	/* Copy binary to domain pages and clear cache */
-	memcpy(mapped_domu, __zephyr_domu_start, domu_size);
+	memcpy(mapped_domu, __uboot_domu_start, domu_size);
 
 	cacheflush.start_pfn = mapped_base_pfn;
 	cacheflush.nr_pfns = nr_pages;
@@ -198,6 +199,87 @@ uint64_t load_domu_image(int domid, uint64_t base_addr)
 
 	/* .text start address in domU memory */
 	return base_addr + zhdr->text_offset;
+}
+
+extern char __domu_dtb_start[];
+extern char __domu_dtb_end[];
+void load_domu_dtb(int domid, uint64_t dtb_addr)
+{
+	int i, rc;
+	void *mapped_dtb;
+	uint64_t mapped_dtb_pfn, dtb_pfn = PHYS_PFN(dtb_addr);
+	uint64_t dtb_size = __domu_dtb_end - __domu_dtb_start;
+	uint64_t nr_pages = ceiling_fraction(dtb_size, XEN_PAGE_SIZE);
+	xen_pfn_t mapped_pfns[nr_pages];
+	xen_pfn_t indexes[nr_pages];
+	int err_codes[nr_pages];
+	struct xen_domctl_cacheflush cacheflush;
+
+	mapped_dtb = k_aligned_alloc(XEN_PAGE_SIZE, XEN_PAGE_SIZE * nr_pages);
+	mapped_dtb_pfn = PHYS_PFN((uint64_t) mapped_dtb);
+
+	for (i = 0; i < nr_pages; i++) {
+		mapped_pfns[i] = mapped_dtb_pfn + i;
+		indexes[i] = dtb_pfn + i;
+	}
+
+	rc = xendom_add_to_physmap_batch(DOMID_SELF, domid, XENMAPSPACE_gmfn_foreign,
+				nr_pages, indexes, mapped_pfns, err_codes);
+	printk("Return code for XENMEM_add_to_physmap_batch = %d\n", rc);
+	printk("mapped_domu = %p\n", mapped_dtb);
+	printk("U-Boot dtb start addr = %p, end addr = %p, binary size = 0x%llx\n",
+			__domu_dtb_start, __domu_dtb_end, dtb_size);
+	printk("U-Boot dtb will be placed on addr = %p\n", (void *) dtb_addr);
+
+	/* Copy binary to domain pages and clear cache */
+	memcpy(mapped_dtb, __domu_dtb_start, dtb_size);
+
+	cacheflush.start_pfn = mapped_dtb_pfn;
+	cacheflush.nr_pfns = nr_pages;
+	rc = xen_domctl_cacheflush(0, &cacheflush);
+	printk("Return code for xen_domctl_cacheflush = %d\n", rc);
+
+	/* Needed to remove mapped DomU pages from Dom0 physmap */
+	for (i = 0; i < nr_pages; i++) {
+		rc = xendom_remove_from_physmap(DOMID_SELF, mapped_pfns[i]);
+	}
+
+	/*
+	 * After this Dom0 will have memory hole in mapped_domu address,
+	 * needed to populate memory on this address before freeing.
+	 */
+	rc = xendom_populate_physmap(DOMID_SELF, 0, nr_pages, 0, mapped_pfns);
+	printk(">>> Return code = %d XENMEM_populate_physmap\n", rc);
+
+	k_free(mapped_dtb);
+}
+
+#define SCIF_IOMEM_MFN		0xE6E68
+#define SCIF_IRQ		185 /* SPI #153 - 0x20 + 153 */
+
+int share_domain_console(int domid)
+{
+	int rc;
+
+	rc = xen_domctl_iomem_permission(domid, SCIF_IOMEM_MFN, 1, 1);
+	if (rc) {
+		printk("Failed to allow iomem access to mfn 0x%x, err = %d\n", SCIF_IOMEM_MFN, rc);
+		return rc;
+	}
+
+	rc = xen_domctl_memory_mapping(domid, SCIF_IOMEM_MFN, SCIF_IOMEM_MFN, 1, 1);
+	if (rc) {
+		printk("Failed to map mfn 0x%x, err = %d\n", SCIF_IOMEM_MFN, rc);
+		return rc;
+	}
+
+	rc = xen_domctl_bind_pt_irq(domid, SCIF_IRQ, PT_IRQ_TYPE_SPI, 0, 0, 0, 0, SCIF_IRQ);
+	if (rc) {
+		printk("Failed to bind irq #%d, err = %d\n", SCIF_IRQ, rc);
+		return rc;
+	}
+
+	return rc;
 }
 
 int map_domain_console_ring(struct xen_domain *domain)
@@ -299,6 +381,8 @@ int domu_create(const struct shell *shell, size_t argc, char **argv)
 	struct xen_domctl_scheduler_op sched_op;
 	uint64_t base_addr = GUEST_RAM0_BASE;
 	uint64_t base_pfn = PHYS_PFN(base_addr);
+	/* place it on last RAM page */
+	uint64_t dtb_addr = GUEST_RAM0_BASE + DOMU_MAXMEM_KB*1024 - XEN_PAGE_SIZE;
 	uint64_t ventry;
 	struct xen_domain *domain;
 
@@ -334,17 +418,22 @@ int domu_create(const struct shell *shell, size_t argc, char **argv)
 	printk("Return code = %d set_address_size\n", rc);
 	domain->address_size = 64;
 
-	rc = xen_domctl_max_mem(domid, DOMU_MAXMEM_KB);
+	rc = xen_domctl_max_mem(domid, DOMU_MAXMEM_KB + NR_MAGIC_PAGES*XEN_PAGE_SIZE);
 	domain->max_mem_kb = DOMU_MAXMEM_KB;
 
 	rc = allocate_domain_evtchns(domain);
 	printk("Return code = %d allocate_domain_evtchns\n", rc);
 	/* TODO: fix mem amount here, some memory should left for populating magic pages */
-	rc = prepare_domu_physmap(domid, base_pfn, DOMU_MAXMEM_KB/2);
+	rc = prepare_domu_physmap(domid, base_pfn, DOMU_MAXMEM_KB);
 
 	ventry = load_domu_image(domid, base_addr);
 
+	load_domu_dtb(domid, dtb_addr);
+
+
+	rc = share_domain_console(domid);
 	memset(&vcpu_ctx, 0, sizeof(vcpu_ctx));
+	vcpu_ctx.user_regs.x0 = dtb_addr;
 	vcpu_ctx.user_regs.pc64 = ventry;
 	vcpu_ctx.user_regs.cpsr = PSR_GUEST64_INIT;
 	vcpu_ctx.sctlr = SCTLR_GUEST_INIT;
