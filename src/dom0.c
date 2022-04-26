@@ -35,6 +35,31 @@
 
 static sys_dlist_t domain_list = SYS_DLIST_STATIC_INIT(&domain_list);
 
+static struct xen_domain_iomem domd_iomems[] = {
+	{ .first_mfn = 0xe6e68, .nr_mfns = 1}, /* SCIF1 */
+	{ .first_mfn = 0xe6150, .nr_mfns = 1}, /* CPG */
+	{ .first_mfn = 0xe6160, .nr_mfns = 1}, /* RST */
+};
+
+static uint32_t domd_irqs[] = {
+	153, /* SCIF1 */
+};
+
+static struct xen_domain_cfg domd_cfg = {
+	.max_mem_kb = 65536,
+
+	.flags = (XEN_DOMCTL_CDF_hvm | XEN_DOMCTL_CDF_hap),
+	.max_evtchns = 10,
+	.max_vcpus = 1,
+	.max_gnt_frames = 1,
+	.nr_spis = 190, /* TODO: make it countable from domd_irqs */
+
+	.iomems = domd_iomems,
+	.nr_iomems = sizeof(domd_iomems) / sizeof(*domd_iomems),
+
+	.irqs = domd_irqs,
+	.nr_irqs = sizeof(domd_irqs) / sizeof(*domd_irqs),
+};
 static void arch_prepare_domain_cfg(struct xen_arch_domainconfig *arch_cfg)
 {
 	arch_cfg->gic_version = XEN_DOMCTL_CONFIG_GIC_V2;
@@ -159,6 +184,7 @@ uint64_t load_domu_image(int domid, uint64_t base_addr)
 
 	struct zimage64_hdr *zhdr = (struct zimage64_hdr *) __uboot_domu_start;
 	uint64_t base_pfn = PHYS_PFN(base_addr);
+	printk("Zimage header details: text_offset = %llx, base_addr = %llx\n", zhdr->text_offset, base_addr);
 
 	mapped_domu = k_aligned_alloc(XEN_PAGE_SIZE, XEN_PAGE_SIZE * nr_pages);
 	mapped_base_pfn = PHYS_PFN((uint64_t) mapped_domu);
@@ -254,31 +280,46 @@ void load_domu_dtb(int domid, uint64_t dtb_addr)
 	k_free(mapped_dtb);
 }
 
-#define SCIF_IOMEM_MFN		0xE6E68
-#define SCIF_IRQ		185 /* SPI #153 - 0x20 + 153 */
-
-int share_domain_console(int domid)
+int share_domain_iomems(int domid, struct xen_domain_iomem *iomems, int nr_iomem)
 {
-	int rc;
+	int i, rc = 0;
 
-	rc = xen_domctl_iomem_permission(domid, SCIF_IOMEM_MFN, 1, 1);
-	if (rc) {
-		printk("Failed to allow iomem access to mfn 0x%x, err = %d\n", SCIF_IOMEM_MFN, rc);
-		return rc;
+	for (i = 0; i < nr_iomem; i++) {
+		rc = xen_domctl_iomem_permission(domid, iomems[i].first_mfn,
+				iomems[i].nr_mfns, 1);
+		if (rc) {
+			printk("Failed to allow iomem access to mfn 0x%llx, err = %d\n",
+					iomems[i].first_mfn, rc);
+			return rc;
+		}
+
+		rc = xen_domctl_memory_mapping(domid, iomems[i].first_mfn,
+				iomems[i].first_mfn, iomems[i].nr_mfns, 1);
+		if (rc) {
+			printk("Failed to map mfn 0x%llx, err = %d\n",
+					iomems[i].first_mfn, rc);
+			return rc;
+		}
 	}
 
-	rc = xen_domctl_memory_mapping(domid, SCIF_IOMEM_MFN, SCIF_IOMEM_MFN, 1, 1);
-	if (rc) {
-		printk("Failed to map mfn 0x%x, err = %d\n", SCIF_IOMEM_MFN, rc);
-		return rc;
-	}
+	return rc;
+}
 
-	rc = xen_domctl_bind_pt_irq(domid, SCIF_IRQ, PT_IRQ_TYPE_SPI, 0, 0, 0, 0, SCIF_IRQ);
-	if (rc) {
-		printk("Failed to bind irq #%d, err = %d\n", SCIF_IRQ, rc);
-		return rc;
-	}
+#define GIC_SPI_SHIFT	0x20
+int bind_domain_irqs(int domid, uint32_t *irqs, int nr_irqs)
+{
+	int i, rc = 0;
+	uint32_t shifted_irq;
 
+	for (i = 0; i < nr_irqs; i++) {
+		shifted_irq = irqs[i] + GIC_SPI_SHIFT;
+		rc = xen_domctl_bind_pt_irq(domid, shifted_irq, PT_IRQ_TYPE_SPI,
+				0, 0, 0, 0, shifted_irq);
+		if (rc) {
+			printk("Failed to bind irq #%d, err = %d\n", irqs[i], rc);
+			return rc;
+		}
+	}
 	return rc;
 }
 
@@ -381,8 +422,9 @@ int domu_create(const struct shell *shell, size_t argc, char **argv)
 	struct xen_domctl_scheduler_op sched_op;
 	uint64_t base_addr = GUEST_RAM0_BASE;
 	uint64_t base_pfn = PHYS_PFN(base_addr);
-	/* place it on last RAM page */
-	uint64_t dtb_addr = GUEST_RAM0_BASE + DOMU_MAXMEM_KB*1024 - XEN_PAGE_SIZE;
+	/* TODO: make it not hardcoded */
+	/* place it on last RAM pages */
+	uint64_t dtb_addr = GUEST_RAM0_BASE + DOMU_MAXMEM_KB*1024 - 4*XEN_PAGE_SIZE;
 	uint64_t ventry;
 	struct xen_domain *domain;
 
@@ -431,7 +473,10 @@ int domu_create(const struct shell *shell, size_t argc, char **argv)
 	load_domu_dtb(domid, dtb_addr);
 
 
-	rc = share_domain_console(domid);
+	rc = share_domain_iomems(domid, domd_cfg.iomems, domd_cfg.nr_iomems);
+
+	rc = bind_domain_irqs(domid, domd_cfg.irqs, domd_cfg.nr_irqs);
+
 	memset(&vcpu_ctx, 0, sizeof(vcpu_ctx));
 	vcpu_ctx.user_regs.x0 = dtb_addr;
 	vcpu_ctx.user_regs.pc64 = ventry;
