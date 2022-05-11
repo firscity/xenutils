@@ -22,23 +22,25 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* TODO: this should be read from some "config" */
-#define DOMU_FLAGS		(XEN_DOMCTL_CDF_hvm | XEN_DOMCTL_CDF_hap)
-#define DOMU_MAX_VCPUS		1
-#define DOMU_MAX_EVTCHN		10
-#define DOMU_MAX_GNT_FRAMES	1
-#define DOMU_MAX_MAPTRCK_FR	1
-
-#define ARCH_DOMU_NR_SPIS	190
-
-#define DOMU_MAXMEM_KB		65536
+#define GIC_SPI_SHIFT		0x20
+#define LOAD_ADDR_OFFSET	0x80000
 
 static sys_dlist_t domain_list = SYS_DLIST_STATIC_INIT(&domain_list);
 
+#define NR_DOMD_DTDEVS 1
+static char *domd_dtdevs[] = {
+	"/soc/ethernet@e6800000",
+};
+
 static struct xen_domain_iomem domd_iomems[] = {
-	{ .first_mfn = 0xe6e68, .nr_mfns = 1}, /* SCIF1 */
-	{ .first_mfn = 0xe6150, .nr_mfns = 1}, /* CPG */
-	{ .first_mfn = 0xe6160, .nr_mfns = 1}, /* RST */
+	{ .first_mfn = 0xe6e68, .nr_mfns = 1},	/* SCIF1 */
+	{ .first_mfn = 0xe6150, .nr_mfns = 1},	/* CPG */
+	{ .first_mfn = 0xe6160, .nr_mfns = 1},	/* RST */
+	{ .first_mfn = 0xe6180, .nr_mfns = 1},	/* SYSC */
+	{ .first_mfn = 0xe6800, .nr_mfns = 1},	/* EtherAVB */
+	{ .first_mfn = 0xe6a00, .nr_mfns = 10},	/* EtherAVB */
+	{ .first_mfn = 0xe6060, .nr_mfns = 1},	/* PFC */
+	{ .first_mfn = 0xe6052, .nr_mfns = 1},	/* GPIO2 */
 };
 
 static uint32_t domd_irqs[] = {
@@ -48,34 +50,55 @@ static uint32_t domd_irqs[] = {
 static struct xen_domain_cfg domd_cfg = {
 	.max_mem_kb = 65536,
 
-	.flags = (XEN_DOMCTL_CDF_hvm | XEN_DOMCTL_CDF_hap),
+	.flags = (XEN_DOMCTL_CDF_hvm | XEN_DOMCTL_CDF_hap | XEN_DOMCTL_CDF_iommu),
 	.max_evtchns = 10,
 	.max_vcpus = 1,
 	.max_gnt_frames = 1,
-	.nr_spis = 190, /* TODO: make it countable from domd_irqs */
+	.max_maptrack_frames = 1,
 
 	.iomems = domd_iomems,
 	.nr_iomems = sizeof(domd_iomems) / sizeof(*domd_iomems),
 
 	.irqs = domd_irqs,
 	.nr_irqs = sizeof(domd_irqs) / sizeof(*domd_irqs),
+
+	.gic_version = XEN_DOMCTL_CONFIG_GIC_V2,
+	.tee_type = XEN_DOMCTL_CONFIG_TEE_NONE,
+
+	.dtdevs = domd_dtdevs,
+	.nr_dtdevs = NR_DOMD_DTDEVS,
 };
-static void arch_prepare_domain_cfg(struct xen_arch_domainconfig *arch_cfg)
+static void arch_prepare_domain_cfg(struct xen_domain_cfg *dom_cfg,
+		struct xen_arch_domainconfig *arch_cfg)
 {
-	arch_cfg->gic_version = XEN_DOMCTL_CONFIG_GIC_V2;
-	arch_cfg->tee_type = XEN_DOMCTL_CONFIG_TEE_NONE;
-	arch_cfg->nr_spis = ARCH_DOMU_NR_SPIS;
+	int i;
+	int max_irq = dom_cfg->nr_irqs ? dom_cfg->irqs[0] : 0;
+
+	arch_cfg->gic_version = dom_cfg->gic_version;
+	arch_cfg->tee_type = dom_cfg->tee_type;
+
+	/*
+	 * xen_arch_domainconfig 'nr_spis' should be >= than biggest
+	 * irq num + 0x20 GIC SPI offset
+	 */
+	for (i = 1; i < dom_cfg->nr_irqs; i++) {
+		if (max_irq < dom_cfg->irqs[i]) {
+			max_irq = dom_cfg->irqs[i];
+		}
+	}
+	arch_cfg->nr_spis = max_irq + GIC_SPI_SHIFT;
 }
 
-static void prepare_domain_cfg(struct xen_domctl_createdomain *cfg)
+static void prepare_domain_cfg(struct xen_domain_cfg *dom_cfg,
+		struct xen_domctl_createdomain *create)
 {
-	cfg->flags = DOMU_FLAGS;
-	cfg->max_vcpus = DOMU_MAX_VCPUS;
-	cfg->max_evtchn_port = DOMU_MAX_EVTCHN;
-	cfg->max_grant_frames = DOMU_MAX_GNT_FRAMES;
-	cfg->max_maptrack_frames = DOMU_MAX_MAPTRCK_FR;
+	create->flags = dom_cfg->flags;
+	create->max_vcpus = dom_cfg->max_vcpus;
+	create->max_evtchn_port = dom_cfg->max_evtchns;
+	create->max_grant_frames = dom_cfg->max_gnt_frames;
+	create->max_maptrack_frames = dom_cfg->max_maptrack_frames;
 
-	arch_prepare_domain_cfg(&cfg->arch);
+	arch_prepare_domain_cfg(dom_cfg, &create->arch);
 }
 
 static int allocate_domain_evtchns(struct xen_domain *domain)
@@ -305,7 +328,6 @@ int share_domain_iomems(int domid, struct xen_domain_iomem *iomems, int nr_iomem
 	return rc;
 }
 
-#define GIC_SPI_SHIFT	0x20
 int bind_domain_irqs(int domid, uint32_t *irqs, int nr_irqs)
 {
 	int i, rc = 0;
@@ -320,6 +342,22 @@ int bind_domain_irqs(int domid, uint32_t *irqs, int nr_irqs)
 			return rc;
 		}
 	}
+	return rc;
+}
+
+int assign_dtdevs(int domid, char *dtdevs[], int nr_dtdevs)
+{
+	int i, rc = 0;
+
+	for (i = 0; i < nr_dtdevs; i++) {
+		rc = xen_domctl_assign_dt_device(domid, dtdevs[i]);
+		if (rc) {
+			printk("Failed to assign dtdev - %s, err = %d\n",
+					dtdevs[i], rc);
+			return rc;
+		}
+	}
+
 	return rc;
 }
 
@@ -424,7 +462,7 @@ int domu_create(const struct shell *shell, size_t argc, char **argv)
 	uint64_t base_pfn = PHYS_PFN(base_addr);
 	/* TODO: make it not hardcoded */
 	/* place it on last RAM pages */
-	uint64_t dtb_addr = GUEST_RAM0_BASE + DOMU_MAXMEM_KB*1024 - 4*XEN_PAGE_SIZE;
+	uint64_t dtb_addr = GUEST_RAM0_BASE;
 	uint64_t ventry;
 	struct xen_domain *domain;
 
@@ -439,7 +477,7 @@ int domu_create(const struct shell *shell, size_t argc, char **argv)
 	}
 
 	memset(&config, 0, sizeof(config));
-	prepare_domain_cfg(&config);
+	prepare_domain_cfg(&domd_cfg, &config);
 	rc = xen_domctl_createdomain(domid, &config);
 	printk("Return code = %d creation\n", rc);
 	if (rc) {
@@ -452,23 +490,24 @@ int domu_create(const struct shell *shell, size_t argc, char **argv)
 	domain->domid = domid;
 	sys_dnode_init(&domain->node);
 
-	rc = xen_domctl_max_vcpus(domid, DOMU_MAX_VCPUS);
+	rc = xen_domctl_max_vcpus(domid, domd_cfg.max_vcpus);
 	printk("Return code = %d max_vcpus\n", rc);
-	domain->num_vcpus = DOMU_MAX_VCPUS;
+	domain->num_vcpus = domd_cfg.max_vcpus;
 
 	rc = xen_domctl_set_address_size(domid, 64);
 	printk("Return code = %d set_address_size\n", rc);
 	domain->address_size = 64;
 
-	rc = xen_domctl_max_mem(domid, DOMU_MAXMEM_KB + NR_MAGIC_PAGES*XEN_PAGE_SIZE);
-	domain->max_mem_kb = DOMU_MAXMEM_KB;
+	rc = xen_domctl_max_mem(domid, domd_cfg.max_mem_kb +
+			NR_MAGIC_PAGES * XEN_PAGE_SIZE);
+	domain->max_mem_kb = domd_cfg.max_mem_kb;
 
 	rc = allocate_domain_evtchns(domain);
 	printk("Return code = %d allocate_domain_evtchns\n", rc);
 	/* TODO: fix mem amount here, some memory should left for populating magic pages */
-	rc = prepare_domu_physmap(domid, base_pfn, DOMU_MAXMEM_KB);
+	rc = prepare_domu_physmap(domid, base_pfn, domd_cfg.max_mem_kb);
 
-	ventry = load_domu_image(domid, base_addr);
+	ventry = load_domu_image(domid, base_addr + LOAD_ADDR_OFFSET);
 
 	load_domu_dtb(domid, dtb_addr);
 
@@ -476,6 +515,9 @@ int domu_create(const struct shell *shell, size_t argc, char **argv)
 	rc = share_domain_iomems(domid, domd_cfg.iomems, domd_cfg.nr_iomems);
 
 	rc = bind_domain_irqs(domid, domd_cfg.irqs, domd_cfg.nr_irqs);
+
+	/* TODO: fix it */
+	rc = assign_dtdevs(domid, domd_dtdevs, 1);
 
 	memset(&vcpu_ctx, 0, sizeof(vcpu_ctx));
 	vcpu_ctx.user_regs.x0 = dtb_addr;

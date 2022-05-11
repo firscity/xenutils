@@ -18,7 +18,6 @@ struct xen_domain_cfg {
 	/* ARM arch related */
 	uint8_t gic_version;
 	uint16_t tee_type;
-	uint32_t nr_spis; /* Should be >= max irq number */
 
 	/* For peripheral sharing*/
 	struct xen_domain_iomem *iomems;
@@ -26,6 +25,9 @@ struct xen_domain_cfg {
 
 	uint32_t *irqs;
 	uint32_t nr_irqs;
+
+	char **dtdevs;
+	uint32_t nr_dtdevs;
 };
 
 struct xen_domain {
