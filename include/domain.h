@@ -1,3 +1,6 @@
+#ifndef XENUTILS_DOMAIN_H
+#define XENUTILS_DOMAIN_H
+
 #include <xen/events.h>
 #include <xen/generic.h>
 
@@ -7,12 +10,12 @@ struct xen_domain_iomem {
 };
 
 struct xen_domain_cfg {
-	uint64_t max_mem_kb;
+	uint64_t mem_kb;
 
 	uint32_t flags;
 	uint32_t max_vcpus;
 	uint32_t max_evtchns;
-	int32_t max_gnt_frames;
+	int32_t gnt_frames;
 	int32_t max_maptrack_frames;
 
 	/* ARM arch related */
@@ -38,4 +41,7 @@ struct xen_domain {
 	uint64_t max_mem_kb;
 	sys_dnode_t node;
 	evtchn_port_t console_evtchn;
+	evtchn_port_t xenbus_evtchn;
 };
+
+#endif /* XENUTILS_DOMAIN_H */

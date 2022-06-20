@@ -22,277 +22,10 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define LOAD_ADDR_OFFSET	0x80000
+#include <domain_configs/domd_config.h>
 
 static sys_dlist_t domain_list = SYS_DLIST_STATIC_INIT(&domain_list);
 
-/* Please, keep this define in sync with number of dtdev entries */
-#define NR_DOMD_DTDEVS 37
-static char *domd_dtdevs[] = {
-	"/soc/dma-controller@e6460000",
-	"/soc/dma-controller@e6470000",
-	"/soc/dma-controller@e6700000",
-	"/soc/dma-controller@e7300000",
-	"/soc/dma-controller@e7310000",
-	"/soc/dma-controller@ec700000",
-	"/soc/dma-controller@ec720000",
-	"/soc/ethernet@e6800000",
-	"/soc/dma-controller@e65a0000",
-	"/soc/dma-controller@e65b0000",
-	"/soc/mmc@ee100000",
-	"/soc/mmc@ee140000",
-	"/soc/usb@ee0a0100",
-	"/soc/usb@ee0a0000",
-	"/soc/imr-lx4@fe860000",
-	"/soc/imr-lx4@fe870000",
-	"/soc/imr-lx4@fe880000",
-	"/soc/imr-lx4@fe890000",
-	"/soc/vspm@fe920000",
-	"/soc/vspm@fe960000",
-	"/soc/vspm@fe9a0000",
-	"/soc/vspm@fe9b0000",
-	"/soc/fcp@fea27000",
-	"/soc/fcp@fea2f000",
-	"/soc/fcp@fea37000",
-	"/soc/fdpm@fe940000",
-	"/soc/fdpm@fe944000",
-	"/soc/hdmi@fead0000",
-	"/soc/gsx_pv0_domd",
-	"/soc/gsx_pv1_domd",
-	"/soc/gsx_pv2_domd",
-	"/soc/gsx_pv3_domd",
-	"/soc/fcpcs_vc0",
-	"/soc/fcpcs_vc1",
-	"/soc/impdm0",
-	"/soc/dma-controller@ffc10000",
-	"/soc/dma-controller@ffc20000",
-};
-
-static struct xen_domain_iomem domd_iomems[] = {
-	{ .first_mfn = 0xe6e68, .nr_mfns = 1},	/* SCIF1 */
-	{ .first_mfn = 0xe6150, .nr_mfns = 1},	/* CPG */
-	{ .first_mfn = 0xe6160, .nr_mfns = 1},	/* RST */
-	{ .first_mfn = 0xe6180, .nr_mfns = 1},	/* SYSC */
-	{ .first_mfn = 0xe6800, .nr_mfns = 1},	/* EtherAVB */
-	{ .first_mfn = 0xe6a00, .nr_mfns = 10},	/* EtherAVB */
-	{ .first_mfn = 0xe6060, .nr_mfns = 1},	/* PFC */
-	{ .first_mfn = 0xe6052, .nr_mfns = 1},	/* GPIO2 */
-};
-
-static uint32_t domd_irqs[] = {
-	/* mfis-as */
-	212,
-	/* gpio@e6050000*/
-	36,
-	/* gpio@e6051000 */
-	37,
-	/* gpio@e6052000*/
-	38,
-	/* gpio@e6053000*/
-	39,
-	/* gpio@e6054000 */
-	40,
-	/* gpio@e6055000 */
-	41,
-	/* gpio@e6055400 */
-	42,
-	/* gpio@e6055800 */
-	43,
-	/* thermal@e6198000 */
-	99, 100, 101,
-	/* interrupt-controller@e61c0000 */
-	32, 33, 34, 35, 193, 50,
-	/* i2c@e6510000 */
-	318,
-	/*  i2c@e66d8000 */
-	51,
-	/* i2c@e60b0000 */
-	205,
-	/* serial@e6550000 */
-	187,
-	/* usb@e6590000 */
-	139,
-	/* TODO: add node to Xen device tree for this - usb@e659c000 */
-	/* 69, */
-	/* dma-controller@e65a0000 */
-	141,
-	/* dma-controller@e65b0000 */
-	142,
-	/* dma-controller@e6460000 */
-	66,
-	/* dma-controller@e6470000 */
-	67,
-	/* crypto@e6601000 */
-	103,
-	/* dma-controller@e6700000 */
-	231, 232, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 243, 244, 245, 246, 247,
-	/* dma-controller@e7300000 */
-	251, 345, 252, 346, 248, 340, 341, 342, 343, 344, 249, 250, 347, 348, 349, 350, 351,
-	/* dma-controller@e7310000 */
-	448, 449, 450, 451, 452, 453, 454, 455, 456, 457, 458, 459, 460, 461, 462, 463, 429,
-	/* ethernet@e6800000 */
-	71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95,
-	/* rpc0@ee200000 */
-	70,
-	/* video@e6ef0000 */
-	220,
-	/* video@e6ef1000 */
-	221,
-	/* video@e6ef2000 */
-	222,
-	/* video@e6ef3000 */
-	223,
-	/* video@e6ef4000 */
-	206,
-	/* video@e6ef5000 */
-	207,
-	/* video@e6ef6000 */
-	208,
-	/* video@e6ef7000 */
-	203,
-	/* src-0 */
-	384,
-	/* src-1 */
-	385,
-	/* src-2 */
-	386,
-	/* src-3 */
-	387,
-	/* src-4 */
-	388,
-	/* src-5 */
-	389,
-	/* src-6 */
-	390,
-	/* src-7 */
-	391,
-	/* src-8 */
-	392,
-	/* src-9 */
-	393,
-	/* ssi-0 */
-	402,
-	/* ssi-1 */
-	403,
-	/* ssi-2 */
-	404,
-	/* ssi-3 */
-	405,
-	/* ssi-4 */
-	406,
-	/* ssi-5 */
-	407,
-	/* ssi-6 */
-	408,
-	/* ssi-7 */
-	409,
-	/* ssi-8 */
-	410,
-	/* ssi-9 */
-	411,
-	/* dma-controller@ec700000 */
-	352, 353, 354, 355, 356, 357, 358, 359, 360, 361, 362, 363, 364, 365, 366, 367, 382,
-	/* dma-controller@ec720000 */
-	383, 368, 369, 370, 371, 372, 373, 374, 375, 376, 377, 378, 379, 380, 381, 414, 415,
-	/* adsp@ec800000 */
-	/*   269, */
-	/* usb@ee000000 */
-	134,
-	/* usb@ee020000 */
-	136,
-	/* usb@ee080000 */
-	140,
-	/* usb@ee0a0000 */
-	144,
-	/* usb@ee0c0000 */
-	145,
-	/* TODO: add node to Xen device tree for this - usb@ee0e0000 */
-	/* 68, */
-	/* mmc@ee100000 */
-	197,
-	/* mmc@ee140000 */
-	199,
-	/* mmc@ee160000 */
-	200,
-	/* gsx@fd000000 */
-	151,
-	/* pcie@fe000000 */
-	148, 149, 150,
-	/* pcie@ee800000 */
-	180, 181, 182,
-	/* imr-lx4@fe860000 */
-	224,
-	/* imr-lx4@fe870000 */
-	225,
-	/* imr-lx4@fe880000 */
-	226,
-	/* imr-lx4@fe890000 */
-	227,
-	/* vcp4@fe8d0000 */
-	412, 413, 255,
-	/* vcp4@fe910000 */
-	292, 293,
-	/* vcp4@fe900000 */
-	272, 273,
-	/* fdpm@fe940000 */
-	294,
-	/* fdpm@fe944000 */
-	295,
-	/* vspm@fe960000 */
-	298,
-	/* vspm@fe920000 */
-	497,
-	/* vsp@fea20000 */
-	498,
-	/* vsp@fea28000 */
-	499,
-	/* vsp@fea30000 */
-	500,
-	/* vspm@fe9a0000 */
-	476,
-	/* vspm@fe9b0000 */
-	477,
-	/* csi2@fea80000 */
-	216,
-	/* csi2@feaa0000 */
-	278,
-	/* hdmi@fead0000 */
-	421,
-	/* hdmi@feae0000 */
-	468,
-	/* display@feb00000 */
-	288, 300, 301, 302,
-	/* impdes0 */
-	471,
-	/* imprtt */
-	425,
-	/* dma-controller@ffc10000 */
-	480, 481, 482, 483, 484, 485, 486, 487, 488,
-	/* dma-controller@ffc20000 */
-	501, 489, 490, 491, 492, 493, 494, 495, 496,
-};
-
-static struct xen_domain_cfg domd_cfg = {
-	.max_mem_kb = 65536,
-
-	.flags = (XEN_DOMCTL_CDF_hvm | XEN_DOMCTL_CDF_hap | XEN_DOMCTL_CDF_iommu),
-	.max_evtchns = 10,
-	.max_vcpus = 1,
-	.max_gnt_frames = 1,
-	.max_maptrack_frames = 1,
-
-	.iomems = domd_iomems,
-	.nr_iomems = sizeof(domd_iomems) / sizeof(*domd_iomems),
-
-	.irqs = domd_irqs,
-	.nr_irqs = sizeof(domd_irqs) / sizeof(*domd_irqs),
-
-	.gic_version = XEN_DOMCTL_CONFIG_GIC_V2,
-	.tee_type = XEN_DOMCTL_CONFIG_TEE_NONE,
-
-	.dtdevs = domd_dtdevs,
-	.nr_dtdevs = NR_DOMD_DTDEVS,
-};
 static void arch_prepare_domain_cfg(struct xen_domain_cfg *dom_cfg,
 		struct xen_arch_domainconfig *arch_cfg)
 {
@@ -320,7 +53,7 @@ static void prepare_domain_cfg(struct xen_domain_cfg *dom_cfg,
 	create->flags = dom_cfg->flags;
 	create->max_vcpus = dom_cfg->max_vcpus;
 	create->max_evtchn_port = dom_cfg->max_evtchns;
-	create->max_grant_frames = dom_cfg->max_gnt_frames;
+	create->max_grant_frames = dom_cfg->gnt_frames;
 	create->max_maptrack_frames = dom_cfg->max_maptrack_frames;
 
 	arch_prepare_domain_cfg(dom_cfg, &create->arch);
@@ -337,14 +70,30 @@ static int allocate_domain_evtchns(struct xen_domain *domain)
 			domain->domid, rc);
 		return rc;
 	}
-
 	domain->console_evtchn = rc;
+
 	rc = hvm_set_parameter(HVM_PARAM_CONSOLE_EVTCHN, domain->domid, domain->console_evtchn);
+	if (rc) {
+		printk("Failed to set domain console evtchn param, rc= %d\n", rc);
+	}
+
+	rc = evtchn_alloc_unbound(domain->domid, 0);
+	if (rc < 0) {
+		printk("failed to alloc evtchn for domain #%d console, rc = %d\n",
+			domain->domid, rc);
+		return rc;
+	}
+	domain->xenbus_evtchn = rc;
+
+	rc = hvm_set_parameter(HVM_PARAM_STORE_EVTCHN, domain->domid, domain->xenbus_evtchn);
+	if (rc) {
+		printk("Failed to set domain xenbus evtchn param, rc= %d\n", rc);
+	}
 
 	return 0;
 }
 
-static int allocate_magic_pages(int domid, uint64_t base_pfn)
+static int allocate_magic_pages(int domid)
 {
 	int rc, i;
 	uint64_t nr_exts = NR_MAGIC_PAGES;
@@ -391,29 +140,47 @@ static int allocate_magic_pages(int domid, uint64_t base_pfn)
 
 	k_free(mapped_magic);
 
-	/* TODO: Set HVM params for all allocated pages */
 	rc = hvm_set_parameter(HVM_PARAM_CONSOLE_PFN, domid, magic_base_pfn + CONSOLE_PFN_OFFSET);
 	rc = hvm_set_parameter(HVM_PARAM_STORE_PFN, domid, magic_base_pfn + XENSTORE_PFN_OFFSET);
 
 	return rc;
 }
 
-/* Xen can populate physmap with different extent size, we are using 2M */
+/* Xen can populate physmap with different extent size, we are using 4K and 2M */
 #define EXTENT_2M_SIZE_KB	2048
 #define EXTENT_2M_PFN_SHIFT	9
+/* We need to populate grant frames, magic pages and memory map here */
 static int prepare_domu_physmap(int domid, uint64_t base_pfn,
-		uint64_t domain_mem_kb)
+		struct xen_domain_cfg *cfg)
 {
 	int i, rc;
-	uint64_t nr_exts = ceiling_fraction(domain_mem_kb, EXTENT_2M_SIZE_KB);
-	xen_pfn_t extents[nr_exts];
+	xen_pfn_t grant_extents[cfg->gnt_frames];
+	uint64_t nr_mem_exts = ceiling_fraction(cfg->mem_kb, EXTENT_2M_SIZE_KB);
+	xen_pfn_t mem_extents[nr_mem_exts];
+	xen_pfn_t gnt_base_pfn = virt_to_mfn(GUEST_GNTTAB_BASE);
 
-	for (i = 0; i < nr_exts; i++) {
-		extents[i] = base_pfn + (i << EXTENT_2M_PFN_SHIFT);
+	/* TODO: using 4K ext, check if it possible to do with bigger ext sizes */
+	for (i = 0; i < cfg->gnt_frames; i++) {
+		grant_extents[i] = gnt_base_pfn + i;
 	}
-	rc = xendom_populate_physmap(domid, EXTENT_2M_PFN_SHIFT, nr_exts, 0, extents);
+	rc = xendom_populate_physmap(domid, 0, cfg->gnt_frames, 0, grant_extents);
+	if (rc != cfg->gnt_frames) {
+		printk("Error while populating %d gnt frames for domain #%d, rc = %d\n",
+			cfg->gnt_frames, domid, rc);
+	}
 
-	return allocate_magic_pages(domid, base_pfn);
+	allocate_magic_pages(domid);
+
+	for (i = 0; i < nr_mem_exts; i++) {
+		mem_extents[i] = base_pfn + (i << EXTENT_2M_PFN_SHIFT);
+	}
+	rc = xendom_populate_physmap(domid, EXTENT_2M_PFN_SHIFT, nr_mem_exts, 0, mem_extents);
+	if (rc != nr_mem_exts) {
+		printk("Error while populating %lld mem exts for domain#%d, rc = %d\n",
+			nr_mem_exts, domid, rc);
+	}
+
+	return 0;
 }
 
 extern char __uboot_domu_start[];
@@ -538,7 +305,6 @@ int share_domain_iomems(int domid, struct xen_domain_iomem *iomems, int nr_iomem
 		if (rc) {
 			printk("Failed to allow iomem access to mfn 0x%llx, err = %d\n",
 					iomems[i].first_mfn, rc);
-			return rc;
 		}
 
 		rc = xen_domctl_memory_mapping(domid, iomems[i].first_mfn,
@@ -546,7 +312,6 @@ int share_domain_iomems(int domid, struct xen_domain_iomem *iomems, int nr_iomem
 		if (rc) {
 			printk("Failed to map mfn 0x%llx, err = %d\n",
 					iomems[i].first_mfn, rc);
-			return rc;
 		}
 	}
 
@@ -669,10 +434,13 @@ int domu_console_start(const struct shell *shell, size_t argc, char **argv)
 
 	return start_domain_console(domain);
 }
+
 int domu_console_stop(const struct shell *shell, size_t argc, char **argv)
 {
 	return stop_domain_console();
 }
+
+#define LOAD_ADDR_OFFSET	0x80000
 int domu_create(const struct shell *shell, size_t argc, char **argv)
 {
 	/* TODO: pass mem, domid etc. as parameters */
@@ -684,7 +452,6 @@ int domu_create(const struct shell *shell, size_t argc, char **argv)
 	uint64_t base_addr = GUEST_RAM0_BASE;
 	uint64_t base_pfn = PHYS_PFN(base_addr);
 	/* TODO: make it not hardcoded */
-	/* place it on last RAM pages */
 	uint64_t dtb_addr = GUEST_RAM0_BASE;
 	uint64_t ventry;
 	struct xen_domain *domain;
@@ -701,7 +468,7 @@ int domu_create(const struct shell *shell, size_t argc, char **argv)
 
 	memset(&config, 0, sizeof(config));
 	prepare_domain_cfg(&domd_cfg, &config);
-	config.grant_opts = 1;
+
 	rc = xen_domctl_createdomain(domid, &config);
 	printk("Return code = %d creation\n", rc);
 	if (rc) {
@@ -722,25 +489,23 @@ int domu_create(const struct shell *shell, size_t argc, char **argv)
 	printk("Return code = %d set_address_size\n", rc);
 	domain->address_size = 64;
 
-	rc = xen_domctl_max_mem(domid, domd_cfg.max_mem_kb +
-			NR_MAGIC_PAGES * XEN_PAGE_SIZE);
-	domain->max_mem_kb = domd_cfg.max_mem_kb;
+	domain->max_mem_kb = domd_cfg.mem_kb +
+			(domd_cfg.gnt_frames + NR_MAGIC_PAGES) * XEN_PAGE_SIZE;
+	rc = xen_domctl_max_mem(domid, domain->max_mem_kb);
 
 	rc = allocate_domain_evtchns(domain);
 	printk("Return code = %d allocate_domain_evtchns\n", rc);
-	/* TODO: fix mem amount here, some memory should left for populating magic pages */
-	rc = prepare_domu_physmap(domid, base_pfn, domd_cfg.max_mem_kb);
+
+	rc = prepare_domu_physmap(domid, base_pfn, &domd_cfg);
 
 	ventry = load_domu_image(domid, base_addr + LOAD_ADDR_OFFSET);
 
 	load_domu_dtb(domid, dtb_addr);
 
-
 	rc = share_domain_iomems(domid, domd_cfg.iomems, domd_cfg.nr_iomems);
 
 	rc = bind_domain_irqs(domid, domd_cfg.irqs, domd_cfg.nr_irqs);
 
-	/* TODO: fix it */
 	rc = assign_dtdevs(domid, domd_dtdevs, domd_cfg.nr_dtdevs);
 
 	memset(&vcpu_ctx, 0, sizeof(vcpu_ctx));
@@ -786,6 +551,8 @@ int domu_create(const struct shell *shell, size_t argc, char **argv)
 		return rc;
 	}
 
+	/* TODO: for debug, remove this or set as optional */
+	start_domain_console(domain);
 	return rc;
 }
 
@@ -814,6 +581,7 @@ int domu_destroy(const struct shell *shell, size_t argc, char **argv)
 	}
 
 	/* TODO: do this on console destroying */
+	stop_domain_console();
 	ring_pfn = virt_to_pfn(domain->intf);
 	rc = xendom_remove_from_physmap(DOMID_SELF, ring_pfn);
 	printk("Return code for xendom_remove_from_physmap = %d, (console ring)\n", rc);
