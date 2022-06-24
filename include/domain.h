@@ -4,8 +4,13 @@
 #include <xen/events.h>
 #include <xen/generic.h>
 
+
 struct xen_domain_iomem {
+	/* where to map, if 0 - map to same place as mfn */
+	uint64_t first_gfn;
+	/* what to map */
 	uint64_t first_mfn;
+	/* how much frames to map */
 	uint64_t nr_mfns;
 };
 

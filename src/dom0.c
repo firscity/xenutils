@@ -307,8 +307,15 @@ int share_domain_iomems(int domid, struct xen_domain_iomem *iomems, int nr_iomem
 					iomems[i].first_mfn, rc);
 		}
 
-		rc = xen_domctl_memory_mapping(domid, iomems[i].first_mfn,
-				iomems[i].first_mfn, iomems[i].nr_mfns, 1);
+		if (!iomems[i].first_gfn) {
+			/* Map to same location as machine frame number */
+			rc = xen_domctl_memory_mapping(domid, iomems[i].first_mfn,
+					iomems[i].first_mfn, iomems[i].nr_mfns, 1);
+		} else {
+			/* Map to specified location */
+			rc = xen_domctl_memory_mapping(domid, iomems[i].first_gfn,
+					iomems[i].first_mfn, iomems[i].nr_mfns, 1);
+		}
 		if (rc) {
 			printk("Failed to map mfn 0x%llx, err = %d\n",
 					iomems[i].first_mfn, rc);

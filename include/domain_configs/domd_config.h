@@ -47,9 +47,9 @@ static char *domd_dtdevs[] = {
 };
 
 static struct xen_domain_iomem domd_iomems[] = {
-	/* TODO: fix this when it will be possible to map on specific dest */
-//	#re-mapped MM_LOSSY_SHARED_MEM_ADDR page
-//	"0x47fd7,1@0xe0000",
+
+	/* #re-mapped MM_LOSSY_SHARED_MEM_ADDR page */
+	{ .first_gfn = 0xe0000, .first_mfn = 0x47fd7, .nr_mfns = 0x1 },
 	{ .first_mfn = 0xe6260, .nr_mfns = 0x1},
 	{ .first_mfn = 0xe6020, .nr_mfns = 0x1},
 	{ .first_mfn = 0xe6050, .nr_mfns = 0x1},
