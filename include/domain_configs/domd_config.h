@@ -87,7 +87,7 @@ static struct xen_domain_iomem domd_iomems[] = {
 	{ .first_mfn = 0xe6e31, .nr_mfns = 0x1},
 	{ .first_mfn = 0xe6e32, .nr_mfns = 0x1},
 	{ .first_mfn = 0xee200, .nr_mfns = 0x1},
-//	{ .first_mfn = 0x08000, .nr_mfns = 0x4000},
+	{ .first_mfn = 0x08000, .nr_mfns = 0x4000},
 	{ .first_mfn = 0xee208, .nr_mfns = 0x1},
 	{ .first_mfn = 0xe6ef0, .nr_mfns = 0x1},
 	{ .first_mfn = 0xe6ef1, .nr_mfns = 0x1},
