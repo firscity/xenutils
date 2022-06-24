@@ -200,6 +200,8 @@ static uint32_t domd_irqs[] = {
 	51,
 	/* i2c@e60b0000 */
 	205,
+	/* serial@e6e68000 */
+	185,
 	/* serial@e6550000 */
 	187,
 	/* usb@e6590000 */
