@@ -60,7 +60,7 @@ void console_read_thrd(void *intf, void *p2, void *p3)
 			memset(buffer, 0, sizeof(buffer));
 			recv = read_from_ring((struct xencons_interface *) intf, buffer, sizeof(buffer));
 			if (recv) {
-				printk("%s", buffer);
+				//printk("%s", buffer);
 			}
 		} while (recv);
 	}
@@ -80,7 +80,7 @@ int start_domain_console(struct xen_domain *domain)
 
 	local_console_chn = evtchn_bind_interdomain(domain->domid, domain->console_evtchn);
 
-	k_sem_init(&sem, 0, 1);
+	k_sem_init(&sem, 1, 1);
 
 	bind_event_channel(local_console_chn, evtchn_callback, NULL);
 
