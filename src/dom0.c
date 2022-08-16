@@ -463,6 +463,7 @@ int domu_create(const struct shell *shell, size_t argc, char **argv)
 
 	memset(&config, 0, sizeof(config));
 	prepare_domain_cfg(&domd_cfg, &config);
+	config.grant_opts = XEN_DOMCTL_GRANT_version(1);
 
 	rc = xen_domctl_createdomain(domid, &config);
 	printk("Return code = %d creation\n", rc);
