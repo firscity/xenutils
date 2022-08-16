@@ -149,25 +149,13 @@ static int allocate_magic_pages(int domid)
 /* Xen can populate physmap with different extent size, we are using 4K and 2M */
 #define EXTENT_2M_SIZE_KB	2048
 #define EXTENT_2M_PFN_SHIFT	9
-/* We need to populate grant frames, magic pages and memory map here */
+/* We need to populate magic pages and memory map here */
 static int prepare_domu_physmap(int domid, uint64_t base_pfn,
 		struct xen_domain_cfg *cfg)
 {
 	int i, rc;
-	xen_pfn_t grant_extents[cfg->gnt_frames];
 	uint64_t nr_mem_exts = ceiling_fraction(cfg->mem_kb, EXTENT_2M_SIZE_KB);
 	xen_pfn_t mem_extents[nr_mem_exts];
-	xen_pfn_t gnt_base_pfn = virt_to_mfn(GUEST_GNTTAB_BASE);
-
-	/* TODO: using 4K ext, check if it possible to do with bigger ext sizes */
-	for (i = 0; i < cfg->gnt_frames; i++) {
-		grant_extents[i] = gnt_base_pfn + i;
-	}
-	rc = xendom_populate_physmap(domid, 0, cfg->gnt_frames, 0, grant_extents);
-	if (rc != cfg->gnt_frames) {
-		printk("Error while populating %d gnt frames for domain #%d, rc = %d\n",
-			cfg->gnt_frames, domid, rc);
-	}
 
 	allocate_magic_pages(domid);
 

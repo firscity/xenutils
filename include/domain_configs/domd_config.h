@@ -372,7 +372,7 @@ struct xen_domain_cfg domd_cfg = {
 	.flags = (XEN_DOMCTL_CDF_hvm | XEN_DOMCTL_CDF_hap | XEN_DOMCTL_CDF_iommu),
 	.max_evtchns = 10,
 	.max_vcpus = 4,
-	.gnt_frames = 1,
+	.gnt_frames = 32,
 	.max_maptrack_frames = 1,
 
 	.iomems = domd_iomems,
