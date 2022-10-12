@@ -590,6 +590,64 @@ int domu_destroy(const struct shell *shell, size_t argc, char **argv)
 	return rc;
 }
 
+int domu_pause(const struct shell *shell, size_t argc, char **argv)
+{
+	int rc;
+	uint32_t domid = 0;
+	struct xen_domain *domain = NULL;
+
+	if (argc < 3 || argc > 4) {
+		return -EINVAL;
+	}
+
+	domid = parse_domid(argc, argv);
+	if (!domid) {
+		shell_error(shell, "Invalid domid passed to destroy cmd\n");
+		return -EINVAL;
+	}
+
+	domain = domid_to_domain(domid);
+	if (!domain) {
+		shell_error(shell, "No domain with domid = %u is present\n", domid);
+		/* Domain with requested domid is not present in list */
+		return -EINVAL;
+	}
+
+	rc = xen_domctl_pausedomain(domid);
+
+	return rc;
+}
+
+int domu_unpause(const struct shell *shell, size_t argc, char **argv)
+{
+	int rc;
+	uint32_t domid = 0;
+	struct xen_domain *domain = NULL;
+
+	if (argc < 3 || argc > 4) {
+		return -EINVAL;
+	}
+
+	domid = parse_domid(argc, argv);
+	if (!domid) {
+		shell_error(shell, "Invalid domid passed to unpause cmd\n");
+		return -EINVAL;
+	}
+
+	shell_print(shell, "domid=%d\n", domid);
+
+	domain = domid_to_domain(domid);
+	if (!domain) {
+		shell_error(shell, "No domain with domid = %u is present\n", domid);
+		/* Domain with requested domid is not present in list */
+		return -EINVAL;
+	}
+
+	rc = xen_domctl_unpausedomain(domid);
+
+	return rc;
+}
+
 void main(void)
 {
 	/* Nothing to do on app start */
