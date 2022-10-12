@@ -41,12 +41,24 @@ struct xen_domain_cfg {
 struct xen_domain {
 	uint32_t domid;
 	struct xencons_interface *intf;
+	struct xenstore_domain_interface *domint;
 	int num_vcpus;
 	int address_size;
 	uint64_t max_mem_kb;
 	sys_dnode_t node;
+
 	evtchn_port_t console_evtchn;
+
+	struct k_sem xb_sem;
+	struct k_thread xenbus_thrd;
+	bool xenbus_thrd_stop;
+	k_tid_t xenbus_tid;
 	evtchn_port_t xenbus_evtchn;
+	evtchn_port_t local_xenbus_evtchn;
+
+	int transaction;
+	int stop_transaction_id;
+	size_t stack_slot;
 };
 
 #endif /* XENUTILS_DOMAIN_H */

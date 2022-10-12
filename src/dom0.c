@@ -13,6 +13,7 @@
 #include <xen/public/hvm/params.h>
 #include <xen/public/domctl.h>
 #include <xen/public/xen.h>
+#include <xen/public/io/xs_wire.h>
 
 #include <domain.h>
 
@@ -24,6 +25,9 @@
 
 #include <domain_configs/domd_config.h>
 #include <domain_configs/domu_config.h>
+#include <processing.h>
+
+static int dom_num = 0;
 
 static sys_dlist_t domain_list = SYS_DLIST_STATIC_INIT(&domain_list);
 
@@ -343,6 +347,40 @@ int assign_dtdevs(int domid, char *dtdevs[], int nr_dtdevs)
 	return rc;
 }
 
+int map_domain_xenstore_ring(struct xen_domain *domain)
+{
+	void *mapped_ring;
+	xen_pfn_t ring_pfn, idx;
+	int err, rc;
+
+	mapped_ring = k_aligned_alloc(XEN_PAGE_SIZE, XEN_PAGE_SIZE);
+	if (!mapped_ring) {
+		printk("Failed to alloc memory for domain #%d console ring buffer\n",
+		       domain->domid);
+		return -ENOMEM;
+	}
+
+	memset(mapped_ring, 0, XEN_PAGE_SIZE);
+	ring_pfn = virt_to_pfn(mapped_ring);
+	idx = PHYS_PFN(GUEST_MAGIC_BASE) + XENSTORE_PFN_OFFSET;
+
+	/* adding single page, but only xatpb can map with foreign domid */
+	rc = xendom_add_to_physmap_batch(DOMID_SELF, domain->domid, XENMAPSPACE_gmfn_foreign, 1,
+					 &idx, &ring_pfn, &err);
+	if (rc) {
+		printk("Failed to map xenstore ring buffer of domain #%d - rc = %d\n",
+		       domain->domid, rc);
+		return rc;
+	}
+
+	domain->domint = mapped_ring;
+	struct xenstore_domain_interface *intf = (struct xenstore_domain_interface *)domain->domint;
+	intf->server_features = XENSTORE_SERVER_FEATURE_RECONNECTION;
+	intf->connection = XENSTORE_CONNECTED;
+
+	return 0;
+}
+
 int map_domain_console_ring(struct xen_domain *domain)
 {
 	void *mapped_ring;
@@ -454,6 +492,11 @@ int domu_create(const struct shell *shell, size_t argc, char **argv)
 		return -EINVAL;
 	}
 
+	if (dom_num >= DOM_MAX) {
+		printk("Runtime exceeds maximum number of domains\n");
+		return -EINVAL;
+	}
+
 	domid = parse_domid(argc, argv);
 	if (!domid) {
 		printk("Invalid domid passed to create cmd\n");
@@ -539,6 +582,14 @@ int domu_create(const struct shell *shell, size_t argc, char **argv)
 
 	/* TODO: lock here? */
 	sys_dlist_append(&domain_list, &domain->node);
+
+	rc = map_domain_xenstore_ring(domain);
+
+	if (rc) {
+		printk("Unable to map domain xenstore ring, rc=%d\n", rc);
+		return rc;
+	}
+
 	rc = xen_domctl_unpausedomain(domid);
 	printk("Return code = %d XEN_DOMCTL_unpausedomain\n", rc);
 
@@ -551,6 +602,9 @@ int domu_create(const struct shell *shell, size_t argc, char **argv)
 
 	/* TODO: for debug, remove this or set as optional */
 	start_domain_console(domain);
+
+	++dom_num;
+
 	return rc;
 }
 
@@ -594,6 +648,8 @@ int domu_destroy(const struct shell *shell, size_t argc, char **argv)
 
 	sys_dlist_remove(&domain->node);
 	k_free(domain);
+
+	--dom_num;
 
 	return rc;
 }
