@@ -23,6 +23,7 @@
 #include <string.h>
 
 #include <domain_configs/domd_config.h>
+#include <domain_configs/domu_config.h>
 
 static sys_dlist_t domain_list = SYS_DLIST_STATIC_INIT(&domain_list);
 
@@ -169,27 +170,28 @@ static int prepare_domu_physmap(int domid, uint64_t base_pfn, struct xen_domain_
 	return 0;
 }
 
-extern char __uboot_domu_start[];
-extern char __uboot_domu_end[];
-uint64_t load_domu_image(int domid, uint64_t base_addr)
+extern char __uboot_domd_start[];
+extern char __uboot_domd_end[];
+uint64_t load_domd_image(int domid, uint64_t base_addr)
 {
 	int i, rc;
-	void *mapped_domu;
+	void *mapped_domd;
 	uint64_t mapped_base_pfn;
-	uint64_t domu_size = __uboot_domu_end - __uboot_domu_start;
-	uint64_t nr_pages = ceiling_fraction(domu_size, XEN_PAGE_SIZE);
+	uint64_t domd_size = __uboot_domd_end - __uboot_domd_start;
+	uint64_t nr_pages = ceiling_fraction(domd_size, XEN_PAGE_SIZE);
 	xen_pfn_t mapped_pfns[nr_pages];
 	xen_pfn_t indexes[nr_pages];
 	int err_codes[nr_pages];
 	struct xen_domctl_cacheflush cacheflush;
 
-	struct zimage64_hdr *zhdr = (struct zimage64_hdr *)__uboot_domu_start;
+	struct zimage64_hdr *zhdr = (struct zimage64_hdr *)__uboot_domd_start;
 	uint64_t base_pfn = PHYS_PFN(base_addr);
 	printk("Zimage header details: text_offset = %llx, base_addr = %llx\n", zhdr->text_offset,
 	       base_addr);
 
-	mapped_domu = k_aligned_alloc(XEN_PAGE_SIZE, XEN_PAGE_SIZE * nr_pages);
-	mapped_base_pfn = PHYS_PFN((uint64_t)mapped_domu);
+	mapped_domd = k_aligned_alloc(XEN_PAGE_SIZE, XEN_PAGE_SIZE * nr_pages);
+	memset(mapped_domd, 0, XEN_PAGE_SIZE * nr_pages);
+	mapped_base_pfn = PHYS_PFN((uint64_t)mapped_domd);
 
 	for (i = 0; i < nr_pages; i++) {
 		mapped_pfns[i] = mapped_base_pfn + i;
@@ -199,12 +201,12 @@ uint64_t load_domu_image(int domid, uint64_t base_addr)
 	rc = xendom_add_to_physmap_batch(DOMID_SELF, domid, XENMAPSPACE_gmfn_foreign, nr_pages,
 					 indexes, mapped_pfns, err_codes);
 	printk("Return code for XENMEM_add_to_physmap_batch = %d\n", rc);
-	printk("mapped_domu = %p\n", mapped_domu);
-	printk("Zephyr DomU start addr = %p, end addr = %p, binary size = 0x%llx\n",
-	       __uboot_domu_start, __uboot_domu_end, domu_size);
+	printk("mapped_domd = %p\n", mapped_domd);
+	printk("Zephyr DomD start addr = %p, end addr = %p, binary size = 0x%llx\n",
+	       __uboot_domd_start, __uboot_domd_end, domd_size);
 
 	/* Copy binary to domain pages and clear cache */
-	memcpy(mapped_domu, __uboot_domu_start, domu_size);
+	memcpy(mapped_domd, __uboot_domd_start, domd_size);
 
 	cacheflush.start_pfn = mapped_base_pfn;
 	cacheflush.nr_pfns = nr_pages;
@@ -217,26 +219,28 @@ uint64_t load_domu_image(int domid, uint64_t base_addr)
 	}
 
 	/*
-	 * After this Dom0 will have memory hole in mapped_domu address,
+	 * After this Dom0 will have memory hole in mapped_domd address,
 	 * needed to populate memory on this address before freeing.
 	 */
 	rc = xendom_populate_physmap(DOMID_SELF, 0, nr_pages, 0, mapped_pfns);
 	printk(">>> Return code = %d XENMEM_populate_physmap\n", rc);
 
-	k_free(mapped_domu);
+	k_free(mapped_domd);
 
 	/* .text start address in domU memory */
 	return base_addr + zhdr->text_offset;
 }
 
-extern char __domu_dtb_start[];
-extern char __domu_dtb_end[];
-void load_domu_dtb(int domid, uint64_t dtb_addr)
+extern char __dtb_domu_start[];
+extern char __dtb_domu_end[];
+extern char __dtb_domd_start[];
+extern char __dtb_domd_end[];
+void load_domd_dtb(int domid, uint64_t dtb_addr, const char *dtb_start, const char *dtb_end)
 {
 	int i, rc;
 	void *mapped_dtb;
 	uint64_t mapped_dtb_pfn, dtb_pfn = PHYS_PFN(dtb_addr);
-	uint64_t dtb_size = __domu_dtb_end - __domu_dtb_start;
+	uint64_t dtb_size = dtb_end - dtb_start;
 	uint64_t nr_pages = ceiling_fraction(dtb_size, XEN_PAGE_SIZE);
 	xen_pfn_t mapped_pfns[nr_pages];
 	xen_pfn_t indexes[nr_pages];
@@ -254,13 +258,13 @@ void load_domu_dtb(int domid, uint64_t dtb_addr)
 	rc = xendom_add_to_physmap_batch(DOMID_SELF, domid, XENMAPSPACE_gmfn_foreign, nr_pages,
 					 indexes, mapped_pfns, err_codes);
 	printk("Return code for XENMEM_add_to_physmap_batch = %d\n", rc);
-	printk("mapped_domu = %p\n", mapped_dtb);
-	printk("U-Boot dtb start addr = %p, end addr = %p, binary size = 0x%llx\n",
-	       __domu_dtb_start, __domu_dtb_end, dtb_size);
+	printk("mapped_dtb = %p\n", mapped_dtb);
+	printk("U-Boot dtb start addr = %p, end addr = %p, binary size = 0x%llx\n", dtb_start,
+	       dtb_end, dtb_size);
 	printk("U-Boot dtb will be placed on addr = %p\n", (void *)dtb_addr);
 
 	/* Copy binary to domain pages and clear cache */
-	memcpy(mapped_dtb, __domu_dtb_start, dtb_size);
+	memcpy(mapped_dtb, dtb_start, dtb_size);
 
 	cacheflush.start_pfn = mapped_dtb_pfn;
 	cacheflush.nr_pfns = nr_pages;
@@ -489,9 +493,13 @@ int domu_create(const struct shell *shell, size_t argc, char **argv)
 
 	rc = prepare_domu_physmap(domid, base_pfn, &domd_cfg);
 
-	ventry = load_domu_image(domid, base_addr + LOAD_ADDR_OFFSET);
+	ventry = load_domd_image(domid, base_addr + LOAD_ADDR_OFFSET);
 
-	load_domu_dtb(domid, dtb_addr);
+	if (domid == 1) {
+		load_domd_dtb(domid, dtb_addr, __dtb_domd_start, __dtb_domd_end);
+	} else {
+		load_domd_dtb(domid, dtb_addr, __dtb_domu_start, __dtb_domu_end);
+	}
 
 	rc = share_domain_iomems(domid, domd_cfg.iomems, domd_cfg.nr_iomems);
 

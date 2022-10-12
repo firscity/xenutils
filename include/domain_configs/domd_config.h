@@ -201,9 +201,9 @@ static uint32_t domd_irqs[] = {
 	/* i2c@e60b0000 */
 	205,
 	/* serial@e6e68000 */
-	185,
+	//185,
 	/* serial@e6550000 */
-	187,
+	//187,
 	/* usb@e6590000 */
 	139,
 	/* TODO: add node to Xen device tree for this - usb@e659c000 */
