@@ -26,8 +26,7 @@ static int read_from_ring(struct xencons_interface *intf, char *str, int len)
 	XENCONS_RING_IDX out_idx = 0;
 
 	compiler_barrier();
-	__ASSERT((prod - cons) <= sizeof(intf->out),
-			"Invalid input ring buffer");
+	__ASSERT((prod - cons) <= sizeof(intf->out), "Invalid input ring buffer");
 
 	while (cons != prod && recv < len) {
 		out_idx = MASK_XENCONS_IDX(cons, intf->out);
@@ -58,7 +57,8 @@ void console_read_thrd(void *intf, void *p2, void *p3)
 
 		do {
 			memset(buffer, 0, sizeof(buffer));
-			recv = read_from_ring((struct xencons_interface *) intf, buffer, sizeof(buffer));
+			recv = read_from_ring((struct xencons_interface *)intf, buffer,
+					      sizeof(buffer));
 			if (recv) {
 				//printk("%s", buffer);
 			}
@@ -85,8 +85,8 @@ int start_domain_console(struct xen_domain *domain)
 	bind_event_channel(local_console_chn, evtchn_callback, NULL);
 
 	console_thrd_stop = false;
-	read_tid = k_thread_create(&read_thrd, read_thrd_stack,
-				K_KERNEL_STACK_SIZEOF(read_thrd_stack),
+	read_tid =
+		k_thread_create(&read_thrd, read_thrd_stack, K_KERNEL_STACK_SIZEOF(read_thrd_stack),
 				console_read_thrd, domain->intf, NULL, NULL, 7, 0, K_NO_WAIT);
 
 	return 0;

@@ -27,7 +27,7 @@
 static sys_dlist_t domain_list = SYS_DLIST_STATIC_INIT(&domain_list);
 
 static void arch_prepare_domain_cfg(struct xen_domain_cfg *dom_cfg,
-		struct xen_arch_domainconfig *arch_cfg)
+				    struct xen_arch_domainconfig *arch_cfg)
 {
 	int i;
 	int max_irq = dom_cfg->nr_irqs ? dom_cfg->irqs[0] : 0;
@@ -48,7 +48,7 @@ static void arch_prepare_domain_cfg(struct xen_domain_cfg *dom_cfg,
 }
 
 static void prepare_domain_cfg(struct xen_domain_cfg *dom_cfg,
-		struct xen_domctl_createdomain *create)
+			       struct xen_domctl_createdomain *create)
 {
 	create->flags = dom_cfg->flags;
 	create->max_vcpus = dom_cfg->max_vcpus;
@@ -66,8 +66,8 @@ static int allocate_domain_evtchns(struct xen_domain *domain)
 	/* TODO: Alloc all required evtchns */
 	rc = evtchn_alloc_unbound(domain->domid, 0);
 	if (rc < 0) {
-		printk("failed to alloc evtchn for domain #%d console, rc = %d\n",
-			domain->domid, rc);
+		printk("failed to alloc evtchn for domain #%d console, rc = %d\n", domain->domid,
+		       rc);
 		return rc;
 	}
 	domain->console_evtchn = rc;
@@ -79,8 +79,8 @@ static int allocate_domain_evtchns(struct xen_domain *domain)
 
 	rc = evtchn_alloc_unbound(domain->domid, 0);
 	if (rc < 0) {
-		printk("failed to alloc evtchn for domain #%d console, rc = %d\n",
-			domain->domid, rc);
+		printk("failed to alloc evtchn for domain #%d console, rc = %d\n", domain->domid,
+		       rc);
 		return rc;
 	}
 	domain->xenbus_evtchn = rc;
@@ -104,7 +104,6 @@ static int allocate_magic_pages(int domid)
 	int err_codes[nr_exts];
 	struct xen_domctl_cacheflush cacheflush;
 
-
 	for (i = 0; i < nr_exts; i++) {
 		extents[i] = magic_base_pfn + i;
 	}
@@ -112,12 +111,12 @@ static int allocate_magic_pages(int domid)
 
 	/* Need to clear memory content of magic pages */
 	mapped_magic = k_aligned_alloc(XEN_PAGE_SIZE, XEN_PAGE_SIZE * nr_exts);
-	mapped_base_pfn = PHYS_PFN((uint64_t) mapped_magic);
+	mapped_base_pfn = PHYS_PFN((uint64_t)mapped_magic);
 	for (i = 0; i < nr_exts; i++) {
 		mapped_pfns[i] = mapped_base_pfn + i;
 	}
-	rc = xendom_add_to_physmap_batch(DOMID_SELF, domid, XENMAPSPACE_gmfn_foreign,
-				nr_exts, extents, mapped_pfns, err_codes);
+	rc = xendom_add_to_physmap_batch(DOMID_SELF, domid, XENMAPSPACE_gmfn_foreign, nr_exts,
+					 extents, mapped_pfns, err_codes);
 
 	memset(mapped_magic, 0, XEN_PAGE_SIZE * nr_exts);
 
@@ -147,11 +146,10 @@ static int allocate_magic_pages(int domid)
 }
 
 /* Xen can populate physmap with different extent size, we are using 4K and 2M */
-#define EXTENT_2M_SIZE_KB	2048
-#define EXTENT_2M_PFN_SHIFT	9
+#define EXTENT_2M_SIZE_KB 2048
+#define EXTENT_2M_PFN_SHIFT 9
 /* We need to populate magic pages and memory map here */
-static int prepare_domu_physmap(int domid, uint64_t base_pfn,
-		struct xen_domain_cfg *cfg)
+static int prepare_domu_physmap(int domid, uint64_t base_pfn, struct xen_domain_cfg *cfg)
 {
 	int i, rc;
 	uint64_t nr_mem_exts = ceiling_fraction(cfg->mem_kb, EXTENT_2M_SIZE_KB);
@@ -164,8 +162,8 @@ static int prepare_domu_physmap(int domid, uint64_t base_pfn,
 	}
 	rc = xendom_populate_physmap(domid, EXTENT_2M_PFN_SHIFT, nr_mem_exts, 0, mem_extents);
 	if (rc != nr_mem_exts) {
-		printk("Error while populating %lld mem exts for domain#%d, rc = %d\n",
-			nr_mem_exts, domid, rc);
+		printk("Error while populating %lld mem exts for domain#%d, rc = %d\n", nr_mem_exts,
+		       domid, rc);
 	}
 
 	return 0;
@@ -185,24 +183,25 @@ uint64_t load_domu_image(int domid, uint64_t base_addr)
 	int err_codes[nr_pages];
 	struct xen_domctl_cacheflush cacheflush;
 
-	struct zimage64_hdr *zhdr = (struct zimage64_hdr *) __uboot_domu_start;
+	struct zimage64_hdr *zhdr = (struct zimage64_hdr *)__uboot_domu_start;
 	uint64_t base_pfn = PHYS_PFN(base_addr);
-	printk("Zimage header details: text_offset = %llx, base_addr = %llx\n", zhdr->text_offset, base_addr);
+	printk("Zimage header details: text_offset = %llx, base_addr = %llx\n", zhdr->text_offset,
+	       base_addr);
 
 	mapped_domu = k_aligned_alloc(XEN_PAGE_SIZE, XEN_PAGE_SIZE * nr_pages);
-	mapped_base_pfn = PHYS_PFN((uint64_t) mapped_domu);
+	mapped_base_pfn = PHYS_PFN((uint64_t)mapped_domu);
 
 	for (i = 0; i < nr_pages; i++) {
 		mapped_pfns[i] = mapped_base_pfn + i;
 		indexes[i] = base_pfn + i;
 	}
 
-	rc = xendom_add_to_physmap_batch(DOMID_SELF, domid, XENMAPSPACE_gmfn_foreign,
-				nr_pages, indexes, mapped_pfns, err_codes);
+	rc = xendom_add_to_physmap_batch(DOMID_SELF, domid, XENMAPSPACE_gmfn_foreign, nr_pages,
+					 indexes, mapped_pfns, err_codes);
 	printk("Return code for XENMEM_add_to_physmap_batch = %d\n", rc);
 	printk("mapped_domu = %p\n", mapped_domu);
 	printk("Zephyr DomU start addr = %p, end addr = %p, binary size = 0x%llx\n",
-		__uboot_domu_start, __uboot_domu_end, domu_size);
+	       __uboot_domu_start, __uboot_domu_end, domu_size);
 
 	/* Copy binary to domain pages and clear cache */
 	memcpy(mapped_domu, __uboot_domu_start, domu_size);
@@ -245,20 +244,20 @@ void load_domu_dtb(int domid, uint64_t dtb_addr)
 	struct xen_domctl_cacheflush cacheflush;
 
 	mapped_dtb = k_aligned_alloc(XEN_PAGE_SIZE, XEN_PAGE_SIZE * nr_pages);
-	mapped_dtb_pfn = PHYS_PFN((uint64_t) mapped_dtb);
+	mapped_dtb_pfn = PHYS_PFN((uint64_t)mapped_dtb);
 
 	for (i = 0; i < nr_pages; i++) {
 		mapped_pfns[i] = mapped_dtb_pfn + i;
 		indexes[i] = dtb_pfn + i;
 	}
 
-	rc = xendom_add_to_physmap_batch(DOMID_SELF, domid, XENMAPSPACE_gmfn_foreign,
-				nr_pages, indexes, mapped_pfns, err_codes);
+	rc = xendom_add_to_physmap_batch(DOMID_SELF, domid, XENMAPSPACE_gmfn_foreign, nr_pages,
+					 indexes, mapped_pfns, err_codes);
 	printk("Return code for XENMEM_add_to_physmap_batch = %d\n", rc);
 	printk("mapped_domu = %p\n", mapped_dtb);
 	printk("U-Boot dtb start addr = %p, end addr = %p, binary size = 0x%llx\n",
-			__domu_dtb_start, __domu_dtb_end, dtb_size);
-	printk("U-Boot dtb will be placed on addr = %p\n", (void *) dtb_addr);
+	       __domu_dtb_start, __domu_dtb_end, dtb_size);
+	printk("U-Boot dtb will be placed on addr = %p\n", (void *)dtb_addr);
 
 	/* Copy binary to domain pages and clear cache */
 	memcpy(mapped_dtb, __domu_dtb_start, dtb_size);
@@ -288,25 +287,23 @@ int share_domain_iomems(int domid, struct xen_domain_iomem *iomems, int nr_iomem
 	int i, rc = 0;
 
 	for (i = 0; i < nr_iomem; i++) {
-		rc = xen_domctl_iomem_permission(domid, iomems[i].first_mfn,
-				iomems[i].nr_mfns, 1);
+		rc = xen_domctl_iomem_permission(domid, iomems[i].first_mfn, iomems[i].nr_mfns, 1);
 		if (rc) {
 			printk("Failed to allow iomem access to mfn 0x%llx, err = %d\n",
-					iomems[i].first_mfn, rc);
+			       iomems[i].first_mfn, rc);
 		}
 
 		if (!iomems[i].first_gfn) {
 			/* Map to same location as machine frame number */
 			rc = xen_domctl_memory_mapping(domid, iomems[i].first_mfn,
-					iomems[i].first_mfn, iomems[i].nr_mfns, 1);
+						       iomems[i].first_mfn, iomems[i].nr_mfns, 1);
 		} else {
 			/* Map to specified location */
 			rc = xen_domctl_memory_mapping(domid, iomems[i].first_gfn,
-					iomems[i].first_mfn, iomems[i].nr_mfns, 1);
+						       iomems[i].first_mfn, iomems[i].nr_mfns, 1);
 		}
 		if (rc) {
-			printk("Failed to map mfn 0x%llx, err = %d\n",
-					iomems[i].first_mfn, rc);
+			printk("Failed to map mfn 0x%llx, err = %d\n", iomems[i].first_mfn, rc);
 		}
 	}
 
@@ -318,8 +315,7 @@ int bind_domain_irqs(int domid, uint32_t *irqs, int nr_irqs)
 	int i, rc = 0;
 
 	for (i = 0; i < nr_irqs; i++) {
-		rc = xen_domctl_bind_pt_irq(domid, irqs[i], PT_IRQ_TYPE_SPI,
-				0, 0, 0, 0, irqs[i]);
+		rc = xen_domctl_bind_pt_irq(domid, irqs[i], PT_IRQ_TYPE_SPI, 0, 0, 0, 0, irqs[i]);
 		if (rc) {
 			printk("Failed to bind irq #%d, err = %d\n", irqs[i], rc);
 			/*return rc;*/
@@ -335,8 +331,7 @@ int assign_dtdevs(int domid, char *dtdevs[], int nr_dtdevs)
 	for (i = 0; i < nr_dtdevs; i++) {
 		rc = xen_domctl_assign_dt_device(domid, dtdevs[i]);
 		if (rc) {
-			printk("Failed to assign dtdev - %s, err = %d\n",
-					dtdevs[i], rc);
+			printk("Failed to assign dtdev - %s, err = %d\n", dtdevs[i], rc);
 			return rc;
 		}
 	}
@@ -353,7 +348,7 @@ int map_domain_console_ring(struct xen_domain *domain)
 	mapped_ring = k_aligned_alloc(XEN_PAGE_SIZE, XEN_PAGE_SIZE);
 	if (!mapped_ring) {
 		printk("Failed to alloc memory for domain #%d console ring buffer\n",
-			domain->domid);
+		       domain->domid);
 		return -ENOMEM;
 	}
 
@@ -361,11 +356,11 @@ int map_domain_console_ring(struct xen_domain *domain)
 	idx = PHYS_PFN(GUEST_MAGIC_BASE) + CONSOLE_PFN_OFFSET;
 
 	/* adding single page, but only xatpb can map with foreign domid */
-	rc = xendom_add_to_physmap_batch(DOMID_SELF, domain->domid, XENMAPSPACE_gmfn_foreign,
-				1, &idx, &ring_pfn, &err);
+	rc = xendom_add_to_physmap_batch(DOMID_SELF, domain->domid, XENMAPSPACE_gmfn_foreign, 1,
+					 &idx, &ring_pfn, &err);
 	if (rc) {
-		printk("Failed to map console ring buffer of domain #%d - rc = %d\n",
-			domain->domid, rc);
+		printk("Failed to map console ring buffer of domain #%d - rc = %d\n", domain->domid,
+		       rc);
 		return rc;
 	}
 
@@ -378,7 +373,7 @@ struct xen_domain *domid_to_domain(uint32_t domid)
 {
 	struct xen_domain *iter;
 
-	SYS_DLIST_FOR_EACH_CONTAINER(&domain_list, iter, node) {
+	SYS_DLIST_FOR_EACH_CONTAINER (&domain_list, iter, node) {
 		if (iter->domid == domid) {
 			return iter;
 		}
@@ -435,7 +430,7 @@ int domu_console_stop(const struct shell *shell, size_t argc, char **argv)
 	return stop_domain_console();
 }
 
-#define LOAD_ADDR_OFFSET	0x80000
+#define LOAD_ADDR_OFFSET 0x80000
 int domu_create(const struct shell *shell, size_t argc, char **argv)
 {
 	/* TODO: pass mem, domid etc. as parameters */
@@ -485,8 +480,8 @@ int domu_create(const struct shell *shell, size_t argc, char **argv)
 	printk("Return code = %d set_address_size\n", rc);
 	domain->address_size = 64;
 
-	domain->max_mem_kb = domd_cfg.mem_kb +
-			(domd_cfg.gnt_frames + NR_MAGIC_PAGES) * XEN_PAGE_SIZE;
+	domain->max_mem_kb =
+		domd_cfg.mem_kb + (domd_cfg.gnt_frames + NR_MAGIC_PAGES) * XEN_PAGE_SIZE;
 	rc = xen_domctl_max_mem(domid, domain->max_mem_kb);
 
 	rc = allocate_domain_evtchns(domain);
@@ -517,9 +512,8 @@ int domu_create(const struct shell *shell, size_t argc, char **argv)
 	memset(&vcpu_ctx, 0, sizeof(vcpu_ctx));
 	rc = xen_domctl_getvcpucontext(domid, 0, &vcpu_ctx);
 	printk("Return code = %d getvcpucontext\n", rc);
-	printk("VCPU PC = 0x%llx, x0 = 0x%llx, x1 = %llx\n",
-		vcpu_ctx.user_regs.pc64, vcpu_ctx.user_regs.x0,
-		vcpu_ctx.user_regs.x1);
+	printk("VCPU PC = 0x%llx, x0 = 0x%llx, x1 = %llx\n", vcpu_ctx.user_regs.pc64,
+	       vcpu_ctx.user_regs.x0, vcpu_ctx.user_regs.x1);
 
 	memset(&sched_op, 0, sizeof(sched_op));
 	sched_op.sched_id = XEN_SCHEDULER_CREDIT2;
@@ -596,6 +590,7 @@ int domu_destroy(const struct shell *shell, size_t argc, char **argv)
 	return rc;
 }
 
-void main(void) {
+void main(void)
+{
 	/* Nothing to do on app start */
 }
