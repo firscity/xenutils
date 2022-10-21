@@ -47,7 +47,12 @@ struct xen_domain {
 	uint64_t max_mem_kb;
 	sys_dnode_t node;
 
+	struct k_sem console_sem;
+	struct k_thread console_thrd;
+	k_tid_t console_tid;
+	bool console_thrd_stop;
 	evtchn_port_t console_evtchn;
+	evtchn_port_t local_console_evtchn;
 
 	struct k_sem xb_sem;
 	struct k_thread xenbus_thrd;
