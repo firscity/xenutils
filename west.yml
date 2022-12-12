@@ -2,17 +2,13 @@
 # West yml manifest for Zephyr dom0 demo
 
 manifest:
-  self:
-    path: .
-
   remotes:
-    - name: firscity_zephyr_dom0
-      url-base: https://github.com/firscity/
+    - name: nexec_zephyr_dom0
+      url-base: https://github.com/nexec/
 
   projects:
-    - name: zephyr_dom0
-      remote: firscity_zephyr_dom0
-      repo-path: zephyr.git
-      revision: uboot-devel
+    - name: zephyr
+      remote: nexec_zephyr_dom0
+      revision: v3.1.0_xendom0
       west-commands: scripts/west-commands.yml
 
