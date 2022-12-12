@@ -17,10 +17,6 @@ static struct xen_domain_iomem domu_iomems[] = {
 };
 
 static uint32_t domu_irqs[] = {
-	/* serial@e6e68000 */
-	185,
-	/* serial@e6550000 */
-	187,
 };
 
 struct xen_domain_cfg domu_cfg = {
