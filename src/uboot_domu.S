@@ -1,13 +1,18 @@
-.section .uboot_domd,"a"
+.section .img_domd,"a"
 
 /* DomD binary from include/ dir */
-.incbin		"domain_bins/u-boot.bin"
+.incbin		"domain_bins/domd_img.bin"
+
+.section .img_domu,"a"
+
+/* DomD binary from include/ dir */
+.incbin		"domain_bins/domu_img.bin"
 
 .section .dtb_domd,"a"
 
 /* DomD dtb from include/ dir */
-.incbin		"domain_bins/uboot_minimal.dtb"
+.incbin		"domain_bins/domd.dtb"
 
 .section .dtb_domu,"a"
 /* DomU dtb from include/ dir */
-.incbin		"domain_bins/uboot_minimal_domu.dtb"
+.incbin		"domain_bins/domu.dtb"

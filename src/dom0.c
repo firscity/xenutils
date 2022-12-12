@@ -180,27 +180,37 @@ static int prepare_domu_physmap(int domid, uint64_t base_pfn, struct xen_domain_
 	return 0;
 }
 
-extern char __uboot_domd_start[];
-extern char __uboot_domd_end[];
-uint64_t load_domd_image(int domid, uint64_t base_addr)
+extern char __img_domd_start[];
+extern char __img_domd_end[];
+extern char __img_domu_start[];
+extern char __img_domu_end[];
+uint64_t load_domd_image(int domid, uint64_t base_addr, const char *img_start, const char *img_end)
 {
 	int i, rc;
 	void *mapped_domd;
 	uint64_t mapped_base_pfn;
-	uint64_t domd_size = __uboot_domd_end - __uboot_domd_start;
+	uint64_t domd_size = img_end - img_start;
 	uint64_t nr_pages = ceiling_fraction(domd_size, XEN_PAGE_SIZE);
 	xen_pfn_t mapped_pfns[nr_pages];
 	xen_pfn_t indexes[nr_pages];
 	int err_codes[nr_pages];
 	struct xen_domctl_cacheflush cacheflush;
 
-	struct zimage64_hdr *zhdr = (struct zimage64_hdr *)__uboot_domd_start;
+	struct zimage64_hdr *zhdr = (struct zimage64_hdr *)img_start;
 	uint64_t base_pfn = PHYS_PFN(base_addr);
-	printk("Zimage header details: text_offset = %llx, base_addr = %llx\n", zhdr->text_offset,
-	       base_addr);
+	printk("Zimage header details: text_offset = %llx, base_addr = %llx, pages = %lld (size = %lld)\n", zhdr->text_offset,
+	       base_addr, nr_pages, nr_pages * XEN_PAGE_SIZE);
 
 	mapped_domd = k_aligned_alloc(XEN_PAGE_SIZE, XEN_PAGE_SIZE * nr_pages);
+
+	if (mapped_domd == NULL)
+	{
+		return NULL;
+	}
+
+	printk("Allocated %ld pages (%ld), mapped_domd=%p\n", nr_pages, XEN_PAGE_SIZE * nr_pages, mapped_domd);
 	memset(mapped_domd, 0, XEN_PAGE_SIZE * nr_pages);
+	printk("cleaned %ld pages\n", nr_pages);
 	mapped_base_pfn = PHYS_PFN((uint64_t)mapped_domd);
 
 	for (i = 0; i < nr_pages; i++) {
@@ -213,10 +223,11 @@ uint64_t load_domd_image(int domid, uint64_t base_addr)
 	printk("Return code for XENMEM_add_to_physmap_batch = %d\n", rc);
 	printk("mapped_domd = %p\n", mapped_domd);
 	printk("Zephyr DomD start addr = %p, end addr = %p, binary size = 0x%llx\n",
-	       __uboot_domd_start, __uboot_domd_end, domd_size);
+	       img_start, img_end, domd_size);
 
 	/* Copy binary to domain pages and clear cache */
-	memcpy(mapped_domd, __uboot_domd_start, domd_size);
+	memcpy(mapped_domd, img_start, domd_size);
+	printk("Binary copied\n");
 
 	cacheflush.start_pfn = mapped_base_pfn;
 	cacheflush.nr_pfns = nr_pages;
@@ -637,12 +648,18 @@ int domu_create(const struct shell *shell, size_t argc, char **argv)
 
 	rc = prepare_domu_physmap(domid, base_pfn, domcfg);
 
-	ventry = load_domd_image(domid, base_addr + LOAD_ADDR_OFFSET);
-
 	if (domid == DOMID_DOMD) {
+		ventry = load_domd_image(domid, base_addr + LOAD_ADDR_OFFSET, __img_domd_start, __img_domd_end);
 		load_domd_dtb(domid, dtb_addr, __dtb_domd_start, __dtb_domd_end);
 	} else {
+		ventry = load_domd_image(domid, base_addr + LOAD_ADDR_OFFSET, __img_domu_start, __img_domu_end);
 		load_domd_dtb(domid, dtb_addr, __dtb_domu_start, __dtb_domu_end);
+	}
+
+	if (ventry == NULL)
+	{
+		printk("Unable to load image, insufficient memory\n");
+		return 10;
 	}
 
 	rc = share_domain_iomems(domid, domcfg->iomems, domcfg->nr_iomems);
