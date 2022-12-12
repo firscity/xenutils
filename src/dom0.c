@@ -14,7 +14,6 @@
 #include <xen/public/domctl.h>
 #include <xen/public/xen.h>
 
-#include <domain.h>
 #include <xen/public/io/console.h>
 #include <xen/public/io/xs_wire.h>
 #include <xen/events.h>
@@ -23,18 +22,20 @@
 #include <kernel.h>
 #include <shell/shell.h>
 #include <stdlib.h>
+#include <stdio.h>
 #include <string.h>
 
+#include "domain.h"
 #include "domain_configs/domd_config.h"
 #include "domain_configs/domu_config.h"
-#include "message_handlers.h"
-#include "storage.h"
-#include "processing.h"
-#include "domain.h"
+#include "xss_message_handlers.h"
+#include "xss_storage.h"
+#include "xss_processing.h"
 
+/* Number of active domains, used as an indicator to not exhaust allocated stack area.
+ * This variable used during shell command execution, thus requires no sync. */
 static int dom_num = 0;
 
-#define STACK_SIZE_PER_DOM (32 * 1024)
 #define DOMID_DOMD 1
 
 static sys_dlist_t domain_list = SYS_DLIST_STATIC_INIT(&domain_list);
@@ -80,14 +81,14 @@ static int allocate_domain_evtchns(struct xen_domain *domain)
 	/* TODO: Alloc all required evtchns */
 	rc = evtchn_alloc_unbound(domain->domid, DOMID_SELF);
 	if (rc < 0) {
-		printk("failed to alloc evtchn for domain #%d console, rc = %d\n", domain->domid,
+		printk("failed to alloc evtchn for domain #%d xenstore, rc = %d\n", domain->domid,
 		       rc);
 		return rc;
 	}
-	domain->xenbus_evtchn = rc;
+	domain->xenstore_evtchn = rc;
 
-	printk("Generated remote_domid=%d, xenbus_evtchn=%d\n", domain->domid,
-	       domain->xenbus_evtchn);
+	printk("Generated remote_domid=%d, xenstore_evtchn=%d\n", domain->domid,
+	       domain->xenstore_evtchn);
 
 	rc = evtchn_alloc_unbound(domain->domid, DOMID_SELF);
 	if (rc < 0) {
@@ -334,6 +335,7 @@ int bind_domain_irqs(int domid, uint32_t *irqs, int nr_irqs)
 			/*return rc;*/
 		}
 	}
+
 	return rc;
 }
 
@@ -357,6 +359,7 @@ int map_domain_xenstore_ring(struct xen_domain *domain)
 	void *mapped_ring;
 	xen_pfn_t ring_pfn, idx;
 	int err, rc;
+	struct xenstore_domain_interface *intf;
 
 	mapped_ring = k_aligned_alloc(XEN_PAGE_SIZE, XEN_PAGE_SIZE);
 	if (!mapped_ring) {
@@ -375,11 +378,12 @@ int map_domain_xenstore_ring(struct xen_domain *domain)
 	if (rc) {
 		printk("Failed to map xenstore ring buffer of domain #%d - rc = %d\n",
 		       domain->domid, rc);
+		k_free(mapped_ring);
 		return rc;
 	}
 
 	domain->domint = mapped_ring;
-	struct xenstore_domain_interface *intf = (struct xenstore_domain_interface *)domain->domint;
+	intf = (struct xenstore_domain_interface *)domain->domint;
 	intf->server_features = XENSTORE_SERVER_FEATURE_RECONNECTION;
 	intf->connection = XENSTORE_CONNECTED;
 
@@ -495,7 +499,7 @@ int domu_console_stop(const struct shell *shell, size_t argc, char **argv)
 	return stop_domain_console(domain);
 }
 
-void initialize_xenstore(uint32_t domid)
+void initialize_xenstore(uint32_t domid, const struct xen_domain_cfg *domcfg, const struct xen_domain *domain)
 {
 	char lbuffer[256] = { 0 };
 	char rbuffer[256] = { 0 };
@@ -519,50 +523,51 @@ void initialize_xenstore(uint32_t domid)
 	// TODO: generate properly
 	snprintf(uuid, 40, "00000000-0000-0000-0000-%012d", domid);
 
-	do_write("/tool/xenstored", "");
+	xss_do_write("/tool/xenstored", "");
 
-	for (int i = 0; i < 4; ++i) {
+	for (int i = 0; i < domcfg->max_vcpus; ++i) {
 		sprintf(lbuffer, "%s/%d/cpu/%d/availability", basepref, domid, i);
-		do_write(lbuffer, "online");
+		xss_do_write(lbuffer, "online");
 	}
 
 	sprintf(lbuffer, "%s/%d/memory/static-max", basepref, domid);
-	do_write(lbuffer, "524288");
+	sprintf(rbuffer, "%lld", domain->max_mem_kb);
+	xss_do_write(lbuffer, rbuffer);
 	sprintf(lbuffer, "%s/%d/memory/target", basepref, domid);
-	do_write(lbuffer, "524289");
+	xss_do_write(lbuffer, rbuffer);
 	sprintf(lbuffer, "%s/%d/memory/videoram", basepref, domid);
-	do_write(lbuffer, "-1");
+	xss_do_write(lbuffer, "-1");
 	sprintf(lbuffer, "%s/%d/control/platform-feature-multiprocessor-suspend", basepref, domid);
-	do_write(lbuffer, "1");
+	xss_do_write(lbuffer, "1");
 	sprintf(lbuffer, "%s/%d/control/platform-feature-xs_reset_watches", basepref, domid);
-	do_write(lbuffer, "1");
+	xss_do_write(lbuffer, "1");
 
 	sprintf(lbuffer, "%s/%d/vm", basepref, domid);
-	do_write(lbuffer, uuid);
+	xss_do_write(lbuffer, uuid);
 
 	sprintf(lbuffer, "/vm/%s/name", uuid);
 	sprintf(rbuffer, "zephyr-%d", domid);
-	do_write(lbuffer, rbuffer);
+	xss_do_write(lbuffer, rbuffer);
 	sprintf(lbuffer, "/local/domain/%d/name", domid);
-	do_write(lbuffer, rbuffer);
+	xss_do_write(lbuffer, rbuffer);
 	sprintf(lbuffer, "/vm/%s/start_time", uuid);
-	do_write(lbuffer, "0");
+	xss_do_write(lbuffer, "0");
 	sprintf(lbuffer, "/vm/%s/uuid", uuid);
-	do_write(lbuffer, uuid);
+	xss_do_write(lbuffer, uuid);
 
 	sprintf(lbuffer, "%s/%d/domid", basepref, domid);
 	sprintf(rbuffer, "%d", domid);
-	do_write(lbuffer, rbuffer);
+	xss_do_write(lbuffer, rbuffer);
 
 	for (int i = 0; dirs[i]; ++i) {
 		sprintf(lbuffer, "%s/%d/%s", basepref, domid, dirs[i]);
-		do_write(lbuffer, "");
+		xss_do_write(lbuffer, "");
 	}
 
 	sprintf(lbuffer, "/libxl/%d/dm-version", domid);
-	do_write(lbuffer, "qemu_xen_traditional");
+	xss_do_write(lbuffer, "qemu_xen_traditional");
 	sprintf(lbuffer, "/libxl/%d/type", domid);
-	do_write(lbuffer, "pvh");
+	xss_do_write(lbuffer, "pvh");
 }
 
 #define LOAD_ADDR_OFFSET 0x80000
@@ -580,6 +585,8 @@ int domu_create(const struct shell *shell, size_t argc, char **argv)
 	uint64_t dtb_addr = GUEST_RAM0_BASE;
 	uint64_t ventry;
 	struct xen_domain *domain;
+	struct xen_domain_cfg *domcfg;
+	char *domdtdevs;
 
 	if (argc < 3 || argc > 4) {
 		return -EINVAL;
@@ -596,8 +603,8 @@ int domu_create(const struct shell *shell, size_t argc, char **argv)
 		return -EINVAL;
 	}
 
-	struct xen_domain_cfg *domcfg = (domid == DOMID_DOMD) ? &domd_cfg : &domu_cfg;
-	char *domdtdevs = (domid == DOMID_DOMD) ? domd_dtdevs : domu_dtdevs;
+	domcfg = (domid == DOMID_DOMD) ? &domd_cfg : &domu_cfg;
+	domdtdevs = (domid == DOMID_DOMD) ? domd_dtdevs : domu_dtdevs;
 
 	memset(&config, 0, sizeof(config));
 	prepare_domain_cfg(domcfg, &config);
@@ -686,7 +693,11 @@ int domu_create(const struct shell *shell, size_t argc, char **argv)
 		return rc;
 	}
 
-	start_domain_stored(domain);
+	rc = start_domain_stored(domain);
+	if (rc) {
+		return rc;
+	}
+
 	/* TODO: do this on console creation */
 	rc = map_domain_console_ring(domain);
 	printk("map domain ring OK\n");
@@ -695,10 +706,21 @@ int domu_create(const struct shell *shell, size_t argc, char **argv)
 	}
 
 	/* TODO: for debug, remove this or set as optional */
-	init_domain_console(domain);
-	start_domain_console(domain);
+	rc = init_domain_console(domain);
 
-	initialize_xenstore(domid);
+	if (rc) {
+		printk("Unable to init domain console, rc=%d\n", rc);
+		return rc;
+	}
+
+	rc = start_domain_console(domain);
+
+	if (rc) {
+		printk("Unable to start domain console, rc=%d\n", rc);
+		return rc;
+	}
+
+	initialize_xenstore(domid, domcfg, domain);
 
 	if (domid == DOMID_DOMD) {
 		rc = xen_domctl_unpausedomain(domid);

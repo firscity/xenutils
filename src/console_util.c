@@ -7,9 +7,10 @@
 #include <init.h>
 #include <kernel.h>
 #include <string.h>
+#include <stdio.h>
 
 #include "domain.h"
-#include "processing.h"
+#include "xss_processing.h"
 
 #define XSS_CONSOLE_STACK_SIZE_PER_DOM 8192
 K_KERNEL_STACK_DEFINE(read_thrd_stack, XSS_CONSOLE_STACK_SIZE_PER_DOM * DOM_MAX);
@@ -96,7 +97,7 @@ int init_domain_console(struct xen_domain *domain)
 		return rc;
 	}
 
-	bind_event_channel(domain->local_console_evtchn, evtchn_callback, domain);
+	rc = bind_event_channel(domain->local_console_evtchn, evtchn_callback, domain);
 
 	return rc;
 }

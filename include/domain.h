@@ -55,11 +55,11 @@ struct xen_domain {
 	evtchn_port_t local_console_evtchn;
 
 	struct k_sem xb_sem;
-	struct k_thread xenbus_thrd;
-	bool xenbus_thrd_stop;
-	k_tid_t xenbus_tid;
-	evtchn_port_t xenbus_evtchn;
-	evtchn_port_t local_xenbus_evtchn;
+	struct k_thread xenstore_thrd;
+	bool xenstore_thrd_stop;
+	k_tid_t xenstore_tid;
+	evtchn_port_t xenstore_evtchn;
+	evtchn_port_t local_xenstore_evtchn;
 
 	int transaction;
 	int running_transaction;

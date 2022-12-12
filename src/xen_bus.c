@@ -1,5 +1,6 @@
 #include <stdint.h>
 #include <string.h>
+#include <stdio.h>
 
 #include <xen/events.h>
 #include <xen/public/hvm/params.h>
@@ -7,15 +8,13 @@
 #include <xen/hvm.h>
 
 #include "domain.h"
-#include "storage.h"
-#include "message_handlers.h"
-#include "processing.h"
+#include "xss_storage.h"
+#include "xss_message_handlers.h"
+#include "xss_processing.h"
 
-#define STACK_SIZE_PER_DOM (32 * 1024)
-K_KERNEL_STACK_DEFINE(xenbus_thrd_stack, STACK_SIZE_PER_DOM *DOM_MAX);
+#define XENSTORE_STACK_SIZE_PER_DOM (32 * 1024)
+K_KERNEL_STACK_DEFINE(xenstore_thrd_stack, XENSTORE_STACK_SIZE_PER_DOM *DOM_MAX);
 static int stack_slots[DOM_MAX] = { 0 };
-
-#define MAX_NAME_LEN 64
 
 K_MUTEX_DEFINE(xsel_mutex);
 K_MUTEX_DEFINE(pfl_mutex);
@@ -26,9 +25,11 @@ sys_dlist_t pending_watch_event_list = SYS_DLIST_STATIC_INIT(&pending_watch_even
 
 struct xs_entry root_xenstore;
 
-struct {
+struct message_handle {
 	void (*h)(struct xen_domain *domain, uint32_t id, char *payload, uint32_t sz);
-} const message_handlers[XS_TYPE_COUNT] = { [XS_CONTROL] = { handle_control },
+};
+
+const struct message_handle message_handle_list[XS_TYPE_COUNT] = { [XS_CONTROL] = { handle_control },
 					    [XS_DIRECTORY] = { handle_directory },
 					    [XS_READ] = { handle_read },
 					    [XS_GET_PERMS] = { handle_get_perms },
@@ -54,7 +55,7 @@ struct {
 struct watch_entry *key_to_watcher(char *key, bool complete, char *token)
 {
 	struct watch_entry *iter;
-	int keyl = strlen(key);
+	size_t keyl = strlen(key);
 
 	SYS_DLIST_FOR_EACH_CONTAINER (&watch_entry_list, iter, node) {
 		if ((!complete || strlen(key) == strlen(iter->key)) &&
@@ -70,28 +71,20 @@ struct watch_entry *key_to_watcher(char *key, bool complete, char *token)
 
 struct xs_entry *key_to_entry(char *key)
 {
+	static const char rootdir[] = "/";
+
+	char *tok, *tok_state;
 	struct xs_entry *next, *iter = NULL;
 	sys_dlist_t *inspected_list = &root_xenstore.child_list;
-	int keyl = strlen(key);
+	size_t keyl = strlen(key);
 
-	char name[32] = { 0 };
-	uint32_t slashpos_prev = 0, slashpos = 1;
-
-	static const char rootdir[] = "/";
-	if (strlen(rootdir) == keyl && memcmp(key, rootdir, keyl) == 0) {
+	if (strncmp(rootdir, key, keyl) == 0) {
 		return &root_xenstore;
 	}
 
-	for (; slashpos_prev < keyl; slashpos = slashpos_prev + 1) {
-		for (; key[slashpos] != '/' && slashpos < keyl; slashpos++)
-			;
-		uint32_t namelen = slashpos - slashpos_prev - 1;
-
-		memcpy(name, key + slashpos_prev + 1, namelen);
-		name[namelen] = 0;
-
+	for (tok = strtok_r(key, "/", &tok_state); tok != NULL; tok = strtok_r(NULL, "/", &tok_state)) {
 		SYS_DLIST_FOR_EACH_CONTAINER_SAFE (inspected_list, iter, next, node) {
-			if (strlen(iter->key) == namelen && memcmp(iter->key, name, namelen) == 0) {
+			if (strcmp(iter->key, tok) == 0) {
 				break;
 			}
 		}
@@ -101,14 +94,9 @@ struct xs_entry *key_to_entry(char *key)
 		}
 
 		inspected_list = &iter->child_list;
-
-		if (slashpos >= keyl) {
-			return iter;
-		}
-		slashpos_prev = slashpos;
 	}
 
-	return NULL;
+	return iter;
 }
 
 static bool check_indexes(XENSTORE_RING_IDX cons, XENSTORE_RING_IDX prod)
@@ -116,10 +104,11 @@ static bool check_indexes(XENSTORE_RING_IDX cons, XENSTORE_RING_IDX prod)
 	return ((prod - cons) > XENSTORE_RING_SIZE);
 }
 
-static uint32_t get_input_offset(XENSTORE_RING_IDX cons, XENSTORE_RING_IDX prod, uint32_t *len)
+static size_t get_input_offset(XENSTORE_RING_IDX cons, XENSTORE_RING_IDX prod, size_t *len)
 {
+	size_t delta = prod - cons;
 	*len = XENSTORE_RING_SIZE - MASK_XENSTORE_IDX(cons);
-	int delta = prod - cons;
+
 	if (delta < *len) {
 		*len = delta;
 	}
@@ -127,10 +116,11 @@ static uint32_t get_input_offset(XENSTORE_RING_IDX cons, XENSTORE_RING_IDX prod,
 	return MASK_XENSTORE_IDX(cons);
 }
 
-static uint32_t get_output_offset(XENSTORE_RING_IDX cons, XENSTORE_RING_IDX prod, uint32_t *len)
+static size_t get_output_offset(XENSTORE_RING_IDX cons, XENSTORE_RING_IDX prod, size_t *len)
 {
+	size_t delta = XENSTORE_RING_SIZE - cons + prod;
 	*len = XENSTORE_RING_SIZE - MASK_XENSTORE_IDX(prod);
-	int delta = XENSTORE_RING_SIZE - cons + prod;
+
 	if (delta < *len) {
 		*len = delta;
 	}
@@ -140,17 +130,17 @@ static uint32_t get_output_offset(XENSTORE_RING_IDX cons, XENSTORE_RING_IDX prod
 
 void write_xb(struct xenstore_domain_interface *intf, uint8_t *data, uint32_t len)
 {
-	uint32_t blen = 0;
-	uint32_t offset = 0;
+	size_t blen = 0;
+	size_t offset = 0;
 
 	do {
-		uint32_t tail = get_output_offset(intf->rsp_cons, intf->rsp_prod, &blen);
+		size_t tail = get_output_offset(intf->rsp_cons, intf->rsp_prod, &blen);
 
 		if (blen == 0) {
 			continue;
 		}
 
-		uint32_t effect = blen > len ? len : blen;
+		size_t effect = blen > len ? len : blen;
 		memcpy(intf->rsp + tail, data + offset, effect);
 		offset += effect;
 		len -= effect;
@@ -158,22 +148,22 @@ void write_xb(struct xenstore_domain_interface *intf, uint8_t *data, uint32_t le
 	} while (len > 0);
 }
 
-uint32_t read_xb(struct xen_domain *domain, uint8_t *data, uint32_t len)
+size_t read_xb(struct xen_domain *domain, uint8_t *data, uint32_t len)
 {
-	uint32_t blen = 0;
-	uint32_t offset = 0;
+	size_t blen = 0;
+	size_t offset = 0;
 	struct xenstore_domain_interface *intf = domain->domint;
 
 	do {
-		uint32_t prod = intf->req_prod;
-		uint32_t ring_offset = get_input_offset(intf->req_cons, prod, &blen);
+		size_t prod = intf->req_prod;
+		size_t ring_offset = get_input_offset(intf->req_cons, prod, &blen);
 
 		if (blen == 0) {
-			notify_evtchn(domain->local_xenbus_evtchn);
+			notify_evtchn(domain->local_xenstore_evtchn);
 			return 0;
 		}
 
-		uint32_t effect = (blen > len) ? len : blen;
+		size_t effect = (blen > len) ? len : blen;
 		memcpy(data + offset, intf->req + ring_offset, effect);
 		offset += effect;
 		len -= effect;
@@ -187,18 +177,17 @@ void send_reply_sz(struct xen_domain *domain, uint32_t id, uint32_t msg_type, co
 		   int sz)
 {
 	struct xenstore_domain_interface *intf = domain->domint;
+	struct xsd_sockmsg h = { .req_id = id, .type = msg_type, .len = sz };
 
 	if (check_indexes(intf->rsp_cons, intf->rsp_prod)) {
 		intf->rsp_cons = 0;
 		intf->rsp_prod = 0;
 	}
 
-	struct xsd_sockmsg h = { .req_id = id, .type = msg_type, .len = sz };
-
 	write_xb(intf, (uint8_t *)&h, sizeof(struct xsd_sockmsg));
-	notify_evtchn(domain->local_xenbus_evtchn);
+	notify_evtchn(domain->local_xenstore_evtchn);
 	write_xb(intf, (uint8_t *)payload, sz);
-	notify_evtchn(domain->local_xenbus_evtchn);
+	notify_evtchn(domain->local_xenstore_evtchn);
 }
 
 void send_reply(struct xen_domain *domain, uint32_t id, uint32_t msg_type, const char *payload)
@@ -213,18 +202,18 @@ void send_reply_read(struct xen_domain *domain, uint32_t id, uint32_t msg_type, 
 
 void handle_directory(struct xen_domain *domain, uint32_t id, char *payload, uint32_t len)
 {
-	uint32_t data_offset = strlen(payload) + 1;
+	size_t data_offset = strlen(payload) + 1;
 	const char localpath[] = "/";
-	char path[128];
+	char path[STRING_LENGTH_MAX];
 
 	if (memcmp(payload, localpath, strlen(localpath)) == 0) {
 		memcpy(path, payload, data_offset);
 	} else {
-		snprintf(path, 128, "/local/domain/%d/%s", domain->domid, payload);
+		snprintf(path, STRING_LENGTH_MAX, "/local/domain/%d/%s", domain->domid, payload);
 	}
 
 	char dirlist[256] = { 0 };
-	uint32_t reply_sz = 0;
+	size_t reply_sz = 0;
 
 	k_mutex_lock(&xsel_mutex, K_FOREVER);
 	struct xs_entry *entry = key_to_entry(path);
@@ -233,7 +222,7 @@ void handle_directory(struct xen_domain *domain, uint32_t id, char *payload, uin
 		struct xs_entry *iter;
 
 		SYS_DLIST_FOR_EACH_CONTAINER (&entry->child_list, iter, node) {
-			uint32_t keyl = strlen(iter->key) + 1;
+			size_t keyl = strlen(iter->key) + 1;
 			memcpy(dirlist + reply_sz, iter->key, keyl);
 			reply_sz += keyl;
 		}
@@ -262,16 +251,16 @@ void send_errno(struct xen_domain *domain, uint32_t id, int err)
 int fire_watcher(struct xen_domain *domain, uint32_t id, char *key)
 {
 	struct watch_entry *iter, *next;
-	uint32_t kplen = strlen(key);
-	char local[128];
-	snprintf(local, 128, "/local/domain/%d", domain->domid);
-	uint32_t loclen = strlen(local);
+	size_t kplen = strlen(key);
+	char local[STRING_LENGTH_MAX];
+	snprintf(local, STRING_LENGTH_MAX, "/local/domain/%d", domain->domid);
+	size_t loclen = strlen(local);
 
 	SYS_DLIST_FOR_EACH_CONTAINER_SAFE (&watch_entry_list, iter, next, node) {
-		uint32_t klen = strlen(iter->key);
+		size_t klen = strlen(iter->key);
 		if (memcmp(iter->key, key, klen) == 0) {
-			int ioffset = 1;
-			int ooffset = 0;
+			size_t ioffset = 1;
+			size_t ooffset = 0;
 			if (iter->is_relative)
 				klen = loclen;
 			else {
@@ -280,8 +269,8 @@ int fire_watcher(struct xen_domain *domain, uint32_t id, char *key)
 				ooffset = 1;
 			}
 
-			uint32_t tlen = strlen(iter->token);
-			uint32_t plen = tlen + kplen - klen + 1 + ooffset;
+			size_t tlen = strlen(iter->token);
+			size_t plen = tlen + kplen - klen + 1 + ooffset;
 			char *pload = k_malloc(plen);
 
 			memset(pload, 0, plen);
@@ -297,44 +286,33 @@ int fire_watcher(struct xen_domain *domain, uint32_t id, char *key)
 	return 1;
 }
 
-void do_write(char *path, char *data)
+void xss_do_write(char *const_path, char *data)
 {
-	struct xs_entry *entry;
-	int keyl = strlen(path);
-	int vall = strlen(data) + 1;
+	struct xs_entry *iter = NULL;
+	char *path;
+	char *tok, *tok_state;
+	size_t vall = strlen(data) + 1;
+	size_t namelen;
 
-	char name[MAX_NAME_LEN] = { 0 };
-	uint32_t slashpos_prev = 0, slashpos = 1;
+	path = k_malloc(strlen(const_path) + 1);
+	strcpy(path, const_path);
 
 	k_mutex_lock(&xsel_mutex, K_FOREVER);
 	sys_dlist_t *inspected_list = &root_xenstore.child_list;
-	struct xs_entry *iter;
 
-	for (; slashpos_prev < keyl; slashpos = slashpos_prev + 1) {
-		for (; slashpos < keyl && path[slashpos] != '/'; slashpos++)
-			;
-
-		long unsigned namelen = slashpos - slashpos_prev - 1;
-
-		if (namelen >= MAX_NAME_LEN) {
-			printk("Error, exceeding max allowed namelen: %ld\n", namelen);
-			break;
-		}
-
-		memcpy(name, path + slashpos_prev + 1, namelen);
-		name[namelen] = 0;
-
+	for (tok = strtok_r(path, "/", &tok_state); tok != NULL; tok = strtok_r(NULL, "/", &tok_state)) {
 		SYS_DLIST_FOR_EACH_CONTAINER (inspected_list, iter, node) {
-			if (strlen(iter->key) == namelen && memcmp(iter->key, name, namelen) == 0) {
+			if (strcmp(iter->key, tok) == 0) {
 				break;
 			}
 		}
 
 		if (iter == NULL) {
-			iter = k_malloc(sizeof(*entry));
+			iter = k_malloc(sizeof(*iter));
 
+			namelen = strlen(tok);
 			iter->key = k_malloc(namelen + 1);
-			memcpy(iter->key, name, namelen);
+			memcpy(iter->key, tok, namelen);
 			iter->key[namelen] = 0;
 			iter->value = NULL;
 
@@ -344,21 +322,15 @@ void do_write(char *path, char *data)
 		}
 
 		inspected_list = &iter->child_list;
+	}
 
-		if (path[slashpos] == 0) {
-			if (vall > 0) {
-				if (iter->value != NULL) {
-					k_free(iter->value);
-				}
-
-				iter->value = k_malloc(vall);
-				memcpy(iter->value, data, vall);
-			}
-
-			break;
+	if (iter && vall > 0) {
+		if (iter->value != NULL) {
+			k_free(iter->value);
 		}
 
-		slashpos_prev = slashpos;
+		iter->value = k_malloc(vall);
+		memcpy(iter->value, data, vall);
 	}
 
 	k_mutex_unlock(&xsel_mutex);
@@ -375,7 +347,7 @@ void notify_sibling_domains(uint32_t *sdom_list, size_t len)
 
 		if (iter)
 		{
-			xb_chn_cb(iter);
+			xs_evtchn_cb((void*)iter);
 		}
 	}
 }
@@ -393,16 +365,16 @@ void _handle_write(struct xen_domain *domain, uint32_t id, uint32_t msg_type, ch
 	}
 
 	const char localpath[] = "/";
-	char path[128];
+	char path[STRING_LENGTH_MAX];
 
 	if (memcmp(payload, localpath, strlen(localpath)) == 0) {
 		memcpy(path, payload, data_offset);
 	} else {
-		snprintf(path, 128, "/local/domain/%d/%s", domain->domid, payload);
+		snprintf(path, STRING_LENGTH_MAX, "/local/domain/%d/%s", domain->domid, payload);
 	}
 
 	data[len - data_offset] = 0;
-	do_write(path, data);
+	xss_do_write(path, data);
 
 	send_reply(domain, id, msg_type, "OK");
 
@@ -415,7 +387,7 @@ void _handle_write(struct xen_domain *domain, uint32_t id, uint32_t msg_type, ch
 		if (memcmp(iter->key, path, iklen) == 0) {
 			struct pending_watch_event_entry *entry;
 			entry = k_malloc(sizeof(*entry));
-			int keyl = strlen(path) + 1;
+			size_t keyl = strlen(path) + 1;
 			entry->key = k_malloc(keyl);
 			memcpy(entry->key, path, keyl);
 			entry->key[keyl - 1] = 0;
@@ -514,16 +486,15 @@ void handle_reset_watches(struct xen_domain *domain, uint32_t id, char *payload,
 void handle_read(struct xen_domain *domain, uint32_t id, char *payload, uint32_t len)
 {
 	const char localpath[] = "/";
-	char path[128];
+	char path[STRING_LENGTH_MAX];
 
 	if (memcmp(payload, localpath, strlen(localpath)) == 0) {
 		memcpy(path, payload, strlen(payload) + 1);
 	} else {
-		snprintf(path, 128, "/local/domain/%d/%s", domain->domid, payload);
+		snprintf(path, STRING_LENGTH_MAX, "/local/domain/%d/%s", domain->domid, payload);
 	}
 
 	struct xenstore_domain_interface *intf = domain->domint;
-
 	struct xs_entry *entry = key_to_entry(path);
 
 	if (entry) {
@@ -585,16 +556,16 @@ void handle_rm(struct xen_domain *domain, uint32_t id, char *payload, uint32_t l
 void handle_watch(struct xen_domain *domain, uint32_t id, char *payload, uint32_t len)
 {
 	const char localpath[] = "/";
-	char path[128];
-	char token[128];
-	uint32_t plen = 0;
+	char path[STRING_LENGTH_MAX];
+	char token[STRING_LENGTH_MAX];
+	size_t plen = 0;
 	bool is_relative = memcmp(payload, localpath, strlen(localpath)) != 0;
 	for (; plen < len && payload[plen] != '\0'; ++plen)
 		;
 	plen += 1;
 
 	if (is_relative) {
-		snprintf(path, 128, "/local/domain/%d/%s", domain->domid, payload);
+		snprintf(path, STRING_LENGTH_MAX, "/local/domain/%d/%s", domain->domid, payload);
 	} else {
 		memcpy(path, payload, plen);
 	}
@@ -602,7 +573,7 @@ void handle_watch(struct xen_domain *domain, uint32_t id, char *payload, uint32_
 	memcpy(token, payload + plen, len - plen);
 
 	struct watch_entry *entry = key_to_watcher(path, true, token);
-	int lpath = strlen(path) + 1;
+	size_t lpath = strlen(path) + 1;
 
 	if (!entry) {
 		entry = k_malloc(sizeof(*entry));
@@ -641,9 +612,9 @@ void handle_watch(struct xen_domain *domain, uint32_t id, char *payload, uint32_
 void handle_unwatch(struct xen_domain *domain, uint32_t id, char *payload, uint32_t len)
 {
 	const char localpath[] = "/";
-	char path[128] = { 0 };
-	char token[128] = { 0 };
-	uint32_t plen = 0;
+	char path[STRING_LENGTH_MAX] = { 0 };
+	char token[STRING_LENGTH_MAX] = { 0 };
+	size_t plen = 0;
 	for (; plen < len && payload[plen] != '\0'; ++plen)
 		;
 	plen += 1;
@@ -651,7 +622,7 @@ void handle_unwatch(struct xen_domain *domain, uint32_t id, char *payload, uint3
 	if (memcmp(payload, localpath, strlen(localpath)) == 0) {
 		memcpy(path, payload, plen);
 	} else {
-		snprintf(path, 128, "/local/domain/%d/%s", domain->domid, payload);
+		snprintf(path, STRING_LENGTH_MAX, "/local/domain/%d/%s", domain->domid, payload);
 	}
 
 	memcpy(token, payload + plen, len - plen);
@@ -701,7 +672,7 @@ void handle_get_domain_path(struct xen_domain *domain, uint32_t id, char *payloa
 	send_reply(domain, id, XS_GET_DOMAIN_PATH, path);
 }
 
-void xb_chn_cb(void *priv)
+void xs_evtchn_cb(void *priv)
 {
 	struct xen_domain *domain = (struct xen_domain *)priv;
 	k_sem_give(&domain->xb_sem);
@@ -710,19 +681,20 @@ void xb_chn_cb(void *priv)
 int start_domain_stored(struct xen_domain *domain)
 {
 	size_t slot = 0;
+	int rc = 0;
 
 	k_sem_init(&domain->xb_sem, 0, 1);
-	domain->local_xenbus_evtchn = evtchn_bind_interdomain(domain->domid, domain->xenbus_evtchn);
+	domain->local_xenstore_evtchn = evtchn_bind_interdomain(domain->domid, domain->xenstore_evtchn);
 
-	bind_event_channel(domain->local_xenbus_evtchn, xb_chn_cb, (void *)domain);
+	bind_event_channel(domain->local_xenstore_evtchn, xs_evtchn_cb, (void *)domain);
 
-	int rc = hvm_set_parameter(HVM_PARAM_STORE_EVTCHN, domain->domid, domain->xenbus_evtchn);
+	rc = hvm_set_parameter(HVM_PARAM_STORE_EVTCHN, domain->domid, domain->xenstore_evtchn);
 	if (rc) {
 		printk("Failed to set domain xenbus evtchn param, rc= %d\n", rc);
 		return rc;
 	}
 
-	domain->xenbus_thrd_stop = false;
+	domain->xenstore_thrd_stop = false;
 
 	for (; slot < DOM_MAX && stack_slots[slot] != 0; ++slot)
 		;
@@ -734,9 +706,9 @@ int start_domain_stored(struct xen_domain *domain)
 
 	stack_slots[slot] = domain->domid;
 	domain->stack_slot = slot;
-	domain->xenbus_tid =
-		k_thread_create(&domain->xenbus_thrd, xenbus_thrd_stack + STACK_SIZE_PER_DOM * slot,
-				K_KERNEL_STACK_SIZEOF(xenbus_thrd_stack) / DOM_MAX, xenbus_evt_thrd,
+	domain->xenstore_tid =
+		k_thread_create(&domain->xenstore_thrd, xenstore_thrd_stack + XENSTORE_STACK_SIZE_PER_DOM * slot,
+				K_KERNEL_STACK_SIZEOF(xenstore_thrd_stack) / DOM_MAX, xenstore_evt_thrd,
 				domain, NULL, NULL, 7, 0, K_NO_WAIT);
 
 	return 0;
@@ -747,28 +719,28 @@ int stop_domain_stored(struct xen_domain *domain)
 	int rc = 0;
 
 	printk("Destroy domain=%p\n", domain);
-	domain->xenbus_thrd_stop = true;
+	domain->xenstore_thrd_stop = true;
 	k_sem_give(&domain->xb_sem);
-	k_thread_join(&domain->xenbus_thrd, K_FOREVER);
+	k_thread_join(&domain->xenstore_thrd, K_FOREVER);
 	stack_slots[domain->stack_slot] = 0;
-	unbind_event_channel(domain->local_xenbus_evtchn);
-	rc = evtchn_close(domain->local_xenbus_evtchn);
+	unbind_event_channel(domain->local_xenstore_evtchn);
+	rc = evtchn_close(domain->local_xenstore_evtchn);
 
 	if (rc)
 	{
-		printk("Unable to close event channel %d, rc=%d\n", domain->local_xenbus_evtchn, rc);
+		printk("Unable to close event channel %d, rc=%d\n", domain->local_xenstore_evtchn, rc);
 	}
 
 	return rc;
 }
 
-void xenbus_evt_thrd(void *p1, void *p2, void *p3)
+void xenstore_evt_thrd(void *p1, void *p2, void *p3)
 {
 	ARG_UNUSED(p2);
 	ARG_UNUSED(p3);
 
-	uint32_t sz;
-	uint32_t delta;
+	size_t sz;
+	size_t delta;
 	struct xsd_sockmsg *header;
 	char input_buffer[XENSTORE_RING_SIZE];
 	struct xen_domain *domain = p1;
@@ -779,13 +751,10 @@ void xenbus_evt_thrd(void *p1, void *p2, void *p3)
 	domain->stop_transaction_id = 0;
 	domain->pending_stop_transaction = false;
 
-	while (!domain->xenbus_thrd_stop) {
-		if (!sys_dlist_is_empty(&pending_watch_event_list)){
-			process_pending_watch_events(domain, domain->running_transaction);
-		}
+	while (!domain->xenstore_thrd_stop) {
+		process_pending_watch_events(domain, domain->running_transaction);
 
 		if (domain->pending_stop_transaction) {
-			printk("[%d] Terminating transaction %d\n", domain->domid, domain->stop_transaction_id);
 			send_reply(domain, domain->stop_transaction_id, XS_TRANSACTION_END, "");
 			domain->stop_transaction_id = 0;
 			domain->pending_stop_transaction = false;
@@ -814,7 +783,7 @@ void xenbus_evt_thrd(void *p1, void *p2, void *p3)
 
 		if (sz == 0)
 		{
-			/* Skip message body processing */
+			/* Skip message body processing, as no header received. */
 			continue;
 		}
 
@@ -826,15 +795,15 @@ void xenbus_evt_thrd(void *p1, void *p2, void *p3)
 			sz += delta;
 		} while (sz < header->len);
 
-		if (message_handlers[header->type].h == NULL) {
+		if (message_handle_list[header->type].h == NULL) {
 			printk("Unsupported message type: %d\n", header->type);
 			send_errno(domain, header->req_id, ENOSYS);
 		} else {
-			message_handlers[header->type].h(domain, header->req_id,
+			message_handle_list[header->type].h(domain, header->req_id,
 							 (char *)(header + 1), header->len);
 		}
 
-		notify_evtchn(domain->local_xenbus_evtchn);
+		notify_evtchn(domain->local_xenstore_evtchn);
 	}
 }
 
