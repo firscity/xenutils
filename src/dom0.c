@@ -643,6 +643,10 @@ int domu_create(const struct shell *shell, size_t argc, char **argv)
 	domain->max_mem_kb = domcfg->mem_kb + (domcfg->gnt_frames + NR_MAGIC_PAGES) * XEN_PAGE_SIZE;
 	rc = xen_domctl_max_mem(domid, domain->max_mem_kb);
 
+	/* Calculation according to xl.cfg manual for shadow memory (1MB/CPU + 8KB for every 1MB RAM */
+	rc = xen_domctl_set_paging_mempool_size(domid, domcfg->max_vcpus * 1024 * 1024 + 8 * domcfg->mem_kb);
+	printk("Return code = %d xen_domctl_set_paging_mempool_size\n", rc);
+
 	rc = allocate_domain_evtchns(domain);
 	printk("Return code = %d allocate_domain_evtchns\n", rc);
 
