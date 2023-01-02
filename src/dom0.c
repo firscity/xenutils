@@ -27,7 +27,7 @@
 
 #include "domain.h"
 #include "domain_configs/domd_config.h"
-#include "domain_configs/domu_config.h"
+/*#include "domain_configs/domu_config.h"*/
 #include "xss_message_handlers.h"
 #include "xss_storage.h"
 #include "xss_processing.h"
@@ -252,8 +252,8 @@ uint64_t load_domd_image(int domid, uint64_t base_addr, const char *img_start, c
 	return base_addr + zhdr->text_offset;
 }
 
-extern char __dtb_domu_start[];
-extern char __dtb_domu_end[];
+/*extern char __dtb_domu_start[];
+extern char __dtb_domu_end[];*/
 extern char __dtb_domd_start[];
 extern char __dtb_domd_end[];
 void load_domd_dtb(int domid, uint64_t dtb_addr, const char *dtb_start, const char *dtb_end)
@@ -614,8 +614,11 @@ int domu_create(const struct shell *shell, size_t argc, char **argv)
 		return -EINVAL;
 	}
 
-	domcfg = (domid == DOMID_DOMD) ? &domd_cfg : &domu_cfg;
-	domdtdevs = (domid == DOMID_DOMD) ? domd_dtdevs : domu_dtdevs;
+	/*domcfg = (domid == DOMID_DOMD) ? &domd_cfg : &domu_cfg;
+	domdtdevs = (domid == DOMID_DOMD) ? domd_dtdevs : domu_dtdevs;*/
+
+	domcfg = &domd_cfg;
+	domdtdevs = domd_dtdevs;
 
 	memset(&config, 0, sizeof(config));
 	prepare_domain_cfg(domcfg, &config);
@@ -655,10 +658,10 @@ int domu_create(const struct shell *shell, size_t argc, char **argv)
 	if (domid == DOMID_DOMD) {
 		ventry = load_domd_image(domid, base_addr + LOAD_ADDR_OFFSET, __img_domd_start, __img_domd_end);
 		load_domd_dtb(domid, dtb_addr, __dtb_domd_start, __dtb_domd_end);
-	} else {
+	} /*else {
 		ventry = load_domd_image(domid, base_addr + LOAD_ADDR_OFFSET, __img_domu_start, __img_domu_end);
 		load_domd_dtb(domid, dtb_addr, __dtb_domu_start, __dtb_domu_end);
-	}
+	}*/
 
 	if (ventry == NULL)
 	{
