@@ -1,14 +1,21 @@
 # SPDX-License-Identifier: Apache-2.0
-# West yml manifest for Zephyr dom0 demo
+# West yml manifest for Zephyr as Xen dom0
 
 manifest:
+  self:
+    path: xenutils
+
   remotes:
-    - name: nexec_zephyr_dom0
-      url-base: https://github.com/nexec/
+    - name: sakib
+      url-base: https://github.com/sa-kib/
+    - name: firscity
+      url-base: https://github.com/firscity/
 
   projects:
     - name: zephyr
-      remote: nexec_zephyr_dom0
-      revision: v3.1.0_xendom0
+      remote: sakib
+      revision: dom0_devel
       west-commands: scripts/west-commands.yml
-
+    - name: xen
+      remote: firscity
+      revision: master
