@@ -13,49 +13,16 @@ To fetch and build this project few steps are required.
 
 First of all you need to pass Zephyr RTOS [getting started guide](https://docs.zephyrproject.org/latest/getting_started/index.html) and install mentioned dependencies and SDK.
 
-Then you need to fetch this repo to separate directory in you workdir (please note, that Zephyr metatool west will fetch all project dependencies to upper directory):
-```
-$: cd ~/
-$: mkdir projectdir   # project dependencies will be located here, e.g. west will copy specific Zephyr snapshot in here
-$: cd projectdir/
-$: git clone https://github.com/firscity/xenutils.git
-$: cd xenutils/
-```
-Now you need to initialize west metatool with project manifest:
-```
-$: west init -l
-```
+Follow commands below to fetch, build and run zephyr under Xen hypervisor in emulated Cortex A53:
 
-To verify that everithing is OK you can check projects list:
 ```
-$: west list
-manifest     xenutils            HEAD                      N/A
-zephyr_dom0  zephyr_dom0         dom0_demo_devel           https://github.com/firscity//zephyr.git
-```
-
-Now it is possible to fetch project dependencies (also this can be performed everytime when you want to get all updates in manifest projects):
-```
+$: west init -m https://github.com/sa-kib/xenutils.git --mr xenutils_devel xephyr
+$: cd xephyr
 $: west update
-```
-
-After successful fetch you `projectdir` will look like this:
-```
-$: ls ~/projectdir/
-xenutils  zephyr_dom0
-```
-
-Now it is possible to configure environment and start project build:
-```
-$: cd ~/projectdir/xenutils/
-$: source ~/projectdir/zephyr_dom0/zephyr-env.sh
-$: west build -b xenvm
-```
-
-After successful build Zephyr RTOS binary will be located in `~/projectdir/xenutils/build/zephyr` directory (`zephyr.bin`). You need to pass it to Xen as Domain 0.
-
-To always rebuild Zephyr sources (useful for debugging build issues), you can set build pristine to `always`:
-```
+$: west zephyr-export
+$: cd xenutils
 $: west build -b xenvm -p always
+$: west build -t run
 ```
 
 Also it is possible to build XenUtils via Zephyr Project Dockerimage. You need to perform all commands, except the last three,
