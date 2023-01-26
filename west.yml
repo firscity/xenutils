@@ -10,10 +10,12 @@ manifest:
       url-base: https://github.com/sa-kib/
     - name: firscity
       url-base: https://github.com/firscity/
+    - name: dsemenets
+      url-base: https://github.com/dsemenets/
 
   projects:
     - name: zephyr
-      remote: sakib
+      remote: dsemenets
       revision: dom0_devel
       west-commands: scripts/west-commands.yml
     - name: xen
