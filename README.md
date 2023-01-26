@@ -16,12 +16,13 @@ First of all you need to pass Zephyr RTOS [getting started guide](https://docs.z
 Follow commands below to fetch, build and run zephyr under Xen hypervisor in emulated Cortex A53:
 
 ```
-$: west init -m https://github.com/sa-kib/xenutils.git --mr xenutils_devel xephyr
+$: west init -m https://github.com/dsemenets/xenutils.git --mr devel_dom0 xephyr
 $: cd xephyr
 $: west update
 $: west zephyr-export
 $: cd xenutils
-$: west build -b xenvm -p always
+$: west build -b xenvm-qemu -p always
+$: west build -t fix_dtb
 $: west build -t run
 ```
 
