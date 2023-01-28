@@ -12,6 +12,8 @@ manifest:
       url-base: https://github.com/firscity/
     - name: dsemenets
       url-base: https://github.com/dsemenets/
+    - name: zephyr
+      url-base: https://github.com/zephyrproject-rtos
 
   projects:
     - name: zephyr
@@ -21,3 +23,9 @@ manifest:
     - name: xen
       remote: firscity
       revision: master
+    - name: littlefs
+      remote: zephyr
+      path: modules/fs/littlefs
+      groups:
+        - fs
+      revision: ca583fd297ceb48bced3c2548600dc615d67af24
