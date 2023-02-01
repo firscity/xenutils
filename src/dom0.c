@@ -4,23 +4,23 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include <xen/dom0/domctl.h>
-#include <xen/dom0/zimage.h>
-#include <xen/generic.h>
-#include <xen/hvm.h>
-#include <xen/memory.h>
-#include <xen/public/hvm/hvm_op.h>
-#include <xen/public/hvm/params.h>
-#include <xen/public/domctl.h>
-#include <xen/public/xen.h>
+#include <zephyr/xen/dom0/domctl.h>
+#include <zephyr/xen/dom0/zimage.h>
+#include <zephyr/xen/generic.h>
+#include <zephyr/xen/hvm.h>
+#include <zephyr/xen/memory.h>
+#include <zephyr/xen/public/hvm/hvm_op.h>
+#include <zephyr/xen/public/hvm/params.h>
+#include <zephyr/xen/public/domctl.h>
+#include <zephyr/xen/public/xen.h>
 
 #include <xen/public/io/console.h>
 #include <xen/public/io/xs_wire.h>
 #include <xen/events.h>
 
-#include <init.h>
-#include <kernel.h>
-#include <shell/shell.h>
+#include <zephyr/init.h>
+#include <zephyr/kernel.h>
+#include <zephyr/shell/shell.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>

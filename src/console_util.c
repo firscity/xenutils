@@ -1,11 +1,11 @@
-#include <xen/generic.h>
-#include <xen/public/io/console.h>
-#include <xen/public/memory.h>
-#include <xen/public/xen.h>
+#include <zephyr/xen/generic.h>
+#include <zephyr/xen/public/io/console.h>
+#include <zephyr/xen/public/memory.h>
+#include <zephyr/xen/public/xen.h>
 #include <xen/hvm.h>
 
-#include <init.h>
-#include <kernel.h>
+#include <zephyr/init.h>
+#include <zephyr/kernel.h>
 #include <string.h>
 #include <stdio.h>
 

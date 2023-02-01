@@ -1,4 +1,4 @@
-#include <shell/shell.h>
+#include <zephyr/shell/shell.h>
 
 extern int domu_console_start(const struct shell *shell, size_t argc, char **argv);
 extern int domu_console_stop(const struct shell *shell, size_t argc, char **argv);

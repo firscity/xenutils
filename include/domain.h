@@ -1,8 +1,8 @@
 #ifndef XENUTILS_DOMAIN_H
 #define XENUTILS_DOMAIN_H
 
-#include <xen/events.h>
-#include <xen/generic.h>
+#include <zephyr/xen/events.h>
+#include <zephyr/xen/generic.h>
 
 struct xen_domain_iomem {
 	/* where to map, if 0 - map to same place as mfn */
