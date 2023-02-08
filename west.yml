@@ -17,8 +17,8 @@ manifest:
 
   projects:
     - name: zephyr
-      remote: dsemenets
-      revision: dom0_devel
+      remote: firscity
+      revision: zephyr_aos_porting
       west-commands: scripts/west-commands.yml
     - name: xen
       remote: firscity
