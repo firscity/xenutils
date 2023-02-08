@@ -1,7 +1,7 @@
 #ifndef XENUTILS_DOMD_CONFIG_H
 #define XENUTILS_DOMD_CONFIG_H
 
-#include <xen/generic.h>
+#include <zephyr/xen/generic.h>
 #include <domain.h>
 
 /* Please, keep this define in sync with number of dtdev entries */

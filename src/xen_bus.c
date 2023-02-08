@@ -2,10 +2,10 @@
 #include <string.h>
 #include <stdio.h>
 
-#include <xen/events.h>
-#include <xen/public/hvm/params.h>
-#include <xen/public/io/xs_wire.h>
-#include <xen/hvm.h>
+#include <zephyr/xen/events.h>
+#include <zephyr/xen/public/hvm/params.h>
+#include <zephyr/xen/public/io/xs_wire.h>
+#include <zephyr/xen/hvm.h>
 
 #include "domain.h"
 #include "xss_storage.h"
@@ -684,9 +684,10 @@ int start_domain_stored(struct xen_domain *domain)
 	int rc = 0;
 
 	k_sem_init(&domain->xb_sem, 0, 1);
-	domain->local_xenstore_evtchn = evtchn_bind_interdomain(domain->domid, domain->xenstore_evtchn);
-
-	bind_event_channel(domain->local_xenstore_evtchn, xs_evtchn_cb, (void *)domain);
+	domain->local_xenstore_evtchn = bind_interdomain_event_channel(domain->domid,
+								       domain->xenstore_evtchn,
+								       xs_evtchn_cb,
+								       (void *)domain);
 
 	rc = hvm_set_parameter(HVM_PARAM_STORE_EVTCHN, domain->domid, domain->xenstore_evtchn);
 	if (rc) {

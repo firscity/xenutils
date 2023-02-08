@@ -2,7 +2,7 @@
 #include <zephyr/xen/public/io/console.h>
 #include <zephyr/xen/public/memory.h>
 #include <zephyr/xen/public/xen.h>
-#include <xen/hvm.h>
+#include <zephyr/xen/hvm.h>
 
 #include <zephyr/init.h>
 #include <zephyr/kernel.h>
@@ -83,7 +83,8 @@ int init_domain_console(struct xen_domain *domain)
 	int rc = 0;
 
 	domain->local_console_evtchn =
-		evtchn_bind_interdomain(domain->domid, domain->console_evtchn);
+		bind_interdomain_event_channel(domain->domid, domain->console_evtchn,
+					       evtchn_callback, domain);
 
 	k_sem_init(&domain->console_sem, 1, 1);
 

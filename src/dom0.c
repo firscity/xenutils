@@ -14,9 +14,9 @@
 #include <zephyr/xen/public/domctl.h>
 #include <zephyr/xen/public/xen.h>
 
-#include <xen/public/io/console.h>
-#include <xen/public/io/xs_wire.h>
-#include <xen/events.h>
+#include <zephyr/xen/public/io/console.h>
+#include <zephyr/xen/public/io/xs_wire.h>
+#include <zephyr/xen/events.h>
 
 #include <zephyr/init.h>
 #include <zephyr/kernel.h>
@@ -79,7 +79,7 @@ static int allocate_domain_evtchns(struct xen_domain *domain)
 	int rc;
 
 	/* TODO: Alloc all required evtchns */
-	rc = evtchn_alloc_unbound(domain->domid, DOMID_SELF);
+	rc = alloc_unbound_event_channel(domain->domid);
 	if (rc < 0) {
 		printk("failed to alloc evtchn for domain #%d xenstore, rc = %d\n", domain->domid,
 		       rc);
@@ -90,7 +90,7 @@ static int allocate_domain_evtchns(struct xen_domain *domain)
 	printk("Generated remote_domid=%d, xenstore_evtchn=%d\n", domain->domid,
 	       domain->xenstore_evtchn);
 
-	rc = evtchn_alloc_unbound(domain->domid, DOMID_SELF);
+	rc = alloc_unbound_event_channel(domain->domid);
 	if (rc < 0) {
 		printk("failed to alloc evtchn for domain #%d console, rc = %d\n", domain->domid,
 		       rc);
@@ -108,7 +108,7 @@ static int allocate_magic_pages(int domid)
 {
 	int rc, i;
 	uint64_t nr_exts = NR_MAGIC_PAGES;
-	xen_pfn_t magic_base_pfn = PHYS_PFN(GUEST_MAGIC_BASE);
+	xen_pfn_t magic_base_pfn = XEN_PHYS_PFN(GUEST_MAGIC_BASE);
 	xen_pfn_t extents[nr_exts];
 	void *mapped_magic;
 	xen_pfn_t mapped_base_pfn, mapped_pfns[nr_exts];
@@ -122,7 +122,7 @@ static int allocate_magic_pages(int domid)
 
 	/* Need to clear memory content of magic pages */
 	mapped_magic = k_aligned_alloc(XEN_PAGE_SIZE, XEN_PAGE_SIZE * nr_exts);
-	mapped_base_pfn = PHYS_PFN((uint64_t)mapped_magic);
+	mapped_base_pfn = XEN_PHYS_PFN((uint64_t)mapped_magic);
 	for (i = 0; i < nr_exts; i++) {
 		mapped_pfns[i] = mapped_base_pfn + i;
 	}
@@ -197,7 +197,7 @@ uint64_t load_domd_image(int domid, uint64_t base_addr, const char *img_start, c
 	struct xen_domctl_cacheflush cacheflush;
 
 	struct zimage64_hdr *zhdr = (struct zimage64_hdr *)img_start;
-	uint64_t base_pfn = PHYS_PFN(base_addr);
+	uint64_t base_pfn = XEN_PHYS_PFN(base_addr);
 	printk("Zimage header details: text_offset = %llx, base_addr = %llx, pages = %lld (size = %lld)\n", zhdr->text_offset,
 	       base_addr, nr_pages, nr_pages * XEN_PAGE_SIZE);
 
@@ -211,7 +211,7 @@ uint64_t load_domd_image(int domid, uint64_t base_addr, const char *img_start, c
 	printk("Allocated %ld pages (%ld), mapped_domd=%p\n", nr_pages, XEN_PAGE_SIZE * nr_pages, mapped_domd);
 	memset(mapped_domd, 0, XEN_PAGE_SIZE * nr_pages);
 	printk("cleaned %ld pages\n", nr_pages);
-	mapped_base_pfn = PHYS_PFN((uint64_t)mapped_domd);
+	mapped_base_pfn = XEN_PHYS_PFN((uint64_t)mapped_domd);
 
 	for (i = 0; i < nr_pages; i++) {
 		mapped_pfns[i] = mapped_base_pfn + i;
@@ -260,7 +260,7 @@ void load_domd_dtb(int domid, uint64_t dtb_addr, const char *dtb_start, const ch
 {
 	int i, rc;
 	void *mapped_dtb;
-	uint64_t mapped_dtb_pfn, dtb_pfn = PHYS_PFN(dtb_addr);
+	uint64_t mapped_dtb_pfn, dtb_pfn = XEN_PHYS_PFN(dtb_addr);
 	uint64_t dtb_size = dtb_end - dtb_start;
 	uint64_t nr_pages = ceiling_fraction(dtb_size, XEN_PAGE_SIZE);
 	xen_pfn_t mapped_pfns[nr_pages];
@@ -269,7 +269,7 @@ void load_domd_dtb(int domid, uint64_t dtb_addr, const char *dtb_start, const ch
 	struct xen_domctl_cacheflush cacheflush;
 
 	mapped_dtb = k_aligned_alloc(XEN_PAGE_SIZE, XEN_PAGE_SIZE * nr_pages);
-	mapped_dtb_pfn = PHYS_PFN((uint64_t)mapped_dtb);
+	mapped_dtb_pfn = XEN_PHYS_PFN((uint64_t)mapped_dtb);
 
 	for (i = 0; i < nr_pages; i++) {
 		mapped_pfns[i] = mapped_dtb_pfn + i;
@@ -380,8 +380,8 @@ int map_domain_xenstore_ring(struct xen_domain *domain)
 	}
 
 	memset(mapped_ring, 0, XEN_PAGE_SIZE);
-	ring_pfn = virt_to_pfn(mapped_ring);
-	idx = PHYS_PFN(GUEST_MAGIC_BASE) + XENSTORE_PFN_OFFSET;
+	ring_pfn = xen_virt_to_gfn(mapped_ring);
+	idx = XEN_PHYS_PFN(GUEST_MAGIC_BASE) + XENSTORE_PFN_OFFSET;
 
 	/* adding single page, but only xatpb can map with foreign domid */
 	rc = xendom_add_to_physmap_batch(DOMID_SELF, domain->domid, XENMAPSPACE_gmfn_foreign, 1,
@@ -414,9 +414,9 @@ int map_domain_console_ring(struct xen_domain *domain)
 		return -ENOMEM;
 	}
 
-	ring_pfn = virt_to_pfn(mapped_ring);
+	ring_pfn = xen_virt_to_gfn(mapped_ring);
 	memset(mapped_ring, 0, XEN_PAGE_SIZE);
-	idx = PHYS_PFN(GUEST_MAGIC_BASE) + CONSOLE_PFN_OFFSET;
+	idx = XEN_PHYS_PFN(GUEST_MAGIC_BASE) + CONSOLE_PFN_OFFSET;
 
 	/* adding single page, but only xatpb can map with foreign domid */
 	rc = xendom_add_to_physmap_batch(DOMID_SELF, domain->domid, XENMAPSPACE_gmfn_foreign, 1,
@@ -591,7 +591,7 @@ int domu_create(const struct shell *shell, size_t argc, char **argv)
 	struct vcpu_guest_context vcpu_ctx;
 	struct xen_domctl_scheduler_op sched_op;
 	uint64_t base_addr = GUEST_RAM0_BASE;
-	uint64_t base_pfn = PHYS_PFN(base_addr);
+	uint64_t base_pfn = XEN_PHYS_PFN(base_addr);
 	/* TODO: make it not hardcoded */
 	uint64_t dtb_addr = GUEST_RAM0_BASE;
 	uint64_t ventry;
@@ -760,7 +760,7 @@ int domu_create(const struct shell *shell, size_t argc, char **argv)
 
 void unmap_domain_ring(void *p)
 {
-	xen_pfn_t ring_pfn = virt_to_pfn(p);
+	xen_pfn_t ring_pfn = xen_virt_to_gfn(p);
 	int rc = xendom_remove_from_physmap(DOMID_SELF, ring_pfn);
 	printk("Return code for xendom_remove_from_physmap = %d [%08p]\n", rc, p);
 
