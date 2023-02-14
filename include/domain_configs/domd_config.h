@@ -374,25 +374,25 @@ static uint32_t domd_irqs[] = {
 };
 
 struct xen_domain_cfg domd_cfg = {
-	.mem_kb = 2097152,
+	.mem_kb = 32768,
 
-	.flags = (XEN_DOMCTL_CDF_hvm | XEN_DOMCTL_CDF_hap | XEN_DOMCTL_CDF_iommu),
+	.flags = (XEN_DOMCTL_CDF_hvm | XEN_DOMCTL_CDF_hap),
 	.max_evtchns = 10,
 	.max_vcpus = 4,
 	.gnt_frames = 32,
 	.max_maptrack_frames = 1,
 
 	.iomems = domd_iomems,
-	.nr_iomems = sizeof(domd_iomems) / sizeof(*domd_iomems),
+	.nr_iomems = 0 /* sizeof(domd_iomems) / sizeof(*domd_iomems) */,
 
 	.irqs = domd_irqs,
-	.nr_irqs = sizeof(domd_irqs) / sizeof(*domd_irqs),
+	.nr_irqs = 0 /* sizeof(domd_irqs) / sizeof(*domd_irqs) */,
 
 	.gic_version = XEN_DOMCTL_CONFIG_GIC_V2,
 	.tee_type = XEN_DOMCTL_CONFIG_TEE_NONE,
 
 	.dtdevs = domd_dtdevs,
-	.nr_dtdevs = NR_DOMD_DTDEVS,
+	.nr_dtdevs = 0 /* NR_DOMD_DTDEVS */,
 };
 
 #endif /* XENUTILS_DOMD_CONFIG_H */
