@@ -14,6 +14,8 @@ manifest:
       url-base: https://github.com/dsemenets/
     - name: zephyr
       url-base: https://github.com/zephyrproject-rtos
+    - name: xentroops
+      url-base: https://github.com/xen-troops/
 
   projects:
     - name: zephyr
@@ -21,8 +23,8 @@ manifest:
       revision: zephyr_aos_porting
       west-commands: scripts/west-commands.yml
     - name: xen
-      remote: firscity
-      revision: master
+      remote: xentroops
+      revision: xen-4.17rc-migration
     - name: littlefs
       remote: zephyr
       path: modules/fs/littlefs
